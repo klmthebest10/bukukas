@@ -309,12 +309,13 @@ const openDebts = kind => S.d.debts.filter(d => d.kind === kind && debtLeft(d) >
 function txTitle(t) {
   if (t.type === 'transfer') return 'Transfer Saldo';
   const c = cat(t.category_id);
+  if (t.ref === 'adjust') return 'Penyesuaian Saldo';
   if (t.ref === 'debt') { const d = byId('debts', t.debt_id); if (!isDebtPay(t)) return d && d.kind === 'hutang' ? 'Pinjaman Diterima' : 'Pinjaman Diberikan'; return (t.type === 'in' ? 'Terima ' : 'Bayar ') + (d ? (d.kind === 'piutang' ? 'Piutang' : 'Hutang') : 'Hutang/Piutang'); }
   if (t.ref === 'sale') return c ? c.name : 'Penjualan';
   if (t.ref === 'purchase') return c ? c.name : 'Pembelian Stok';
   return c ? c.name : (t.type === 'in' ? 'Pemasukan' : 'Pengeluaran');
 }
-function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'debt') return '🤝'; const c = cat(t.category_id); return (c && c.icon) || (t.type === 'in' ? '💰' : '🧾'); }
+function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'adjust') return '⚖️'; if (t.ref === 'debt') return '🤝'; const c = cat(t.category_id); return (c && c.icon) || (t.type === 'in' ? '💰' : '🧾'); }
 function catSpend(catId, from, to) { return sum(S.d.transactions.filter(t => t.category_id === catId && t.type === 'out' && inR(t.date, from, to)), t => t.amount); }
 function monthRange(offset = 0) { const d = new Date(today() + 'T00:00:00'); const a = new Date(d.getFullYear(), d.getMonth() + offset, 1), b = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0); return { from: dstr(a), to: dstr(b) }; }
 function metricAgg(m, logs) {
@@ -769,9 +770,9 @@ PAGES.dashboard = {
     <div class="mb">${periodChips(S.period, 'setPeriod')}</div>
     <div class="grid g-dash mb">
       <div class="hero">
-        <div class="lbl">Total Saldo Usaha</div>
+        <div class="lbl" style="justify-content:space-between">Total Saldo Usaha<button type="button" onclick="balanceAll()" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;padding:4px 10px;font-weight:700;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px">${ic('edit')} Ubah saldo</button></div>
         <div class="val num">${money(bal)}</div>
-        <div class="acc-chips">${S.d.accounts.map(a => `<div class="acc-chip"><small>${esc(a.name)}</small><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div>
+        <div class="acc-chips">${S.d.accounts.map(a => `<div class="acc-chip" role="button" tabindex="0" style="cursor:pointer" title="Ubah saldo ${esc(a.name)}" onclick="balanceForm('${a.id}')"><small>${esc(a.name)} ✎</small><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div>
         <div class="hero-actions">
           <button onclick="txForm(null,'in')">${ic('up')}Pemasukan</button>
           <button onclick="txForm(null,'out')">${ic('down')}Pengeluaran</button>
@@ -907,13 +908,13 @@ function txForm(id, type = 'in', preset = {}) {
   if (!S.d.accounts.length) return toast('Tambahkan akun kas/bank dulu di Pengaturan', true);
   const lockAmt = t && (t.ref === 'sale' || t.ref === 'purchase');
   const v = t || { date: today(), amount: preset.amount || '', category_id: preset.category_id || '', account_id: S.d.accounts[0].id, to_account_id: (S.d.accounts[1] || {}).id, note: '', contact_id: '' };
-  const cl = cats(type === 'transfer' ? 'x' : type);
+  const cl = cats(type === 'transfer' ? 'x' : type), noCat = t && (t.ref === 'adjust' || (t.ref === 'debt' && !t.category_id));
   const title = t ? 'Detail Transaksi' : type === 'in' ? 'Catat Pemasukan' : type === 'out' ? 'Catat Pengeluaran' : 'Transfer Saldo';
   const body = `<form id="txf">
-    ${!t ? `<div class="seg"><button type="button" class="${type === 'in' ? 'on in' : ''}" onclick="txForm(null,'in')">⬆ Pemasukan</button><button type="button" class="${type === 'out' ? 'on out' : ''}" onclick="txForm(null,'out')">⬇ Pengeluaran</button><button type="button" class="${type === 'transfer' ? 'on' : ''}" onclick="txForm(null,'transfer')">🔁 Transfer</button></div>` : `<div class="row mb"><span class="pill ${type === 'in' ? 'in' : type === 'out' ? 'out' : 'info'}">${type === 'in' ? 'Pemasukan' : type === 'out' ? 'Pengeluaran' : 'Transfer'}</span>${t.ref ? `<span class="pill neutral">${t.ref === 'sale' ? 'Penjualan kasir' : t.ref === 'purchase' ? 'Pembelian stok' : 'Hutang/Piutang'}</span>` : ''}</div>`}
+    ${!t ? `<div class="seg"><button type="button" class="${type === 'in' ? 'on in' : ''}" onclick="txForm(null,'in')">⬆ Pemasukan</button><button type="button" class="${type === 'out' ? 'on out' : ''}" onclick="txForm(null,'out')">⬇ Pengeluaran</button><button type="button" class="${type === 'transfer' ? 'on' : ''}" onclick="txForm(null,'transfer')">🔁 Transfer</button></div>` : `<div class="row mb"><span class="pill ${type === 'in' ? 'in' : type === 'out' ? 'out' : 'info'}">${type === 'in' ? 'Pemasukan' : type === 'out' ? 'Pengeluaran' : 'Transfer'}</span>${t.ref ? `<span class="pill neutral">${t.ref === 'sale' ? 'Penjualan kasir' : t.ref === 'purchase' ? 'Pembelian stok' : t.ref === 'adjust' ? 'Penyesuaian saldo — tidak dihitung laba/rugi' : 'Hutang/Piutang'}</span>` : ''}</div>`}
     ${t && t.items ? `<div class="card mb" style="background:var(--surface-2);padding:12px">${t.items.map(i => `<div class="row between small"><span>${esc(i.name)} × ${numf(i.qty, 2)}</span><b class="num">${money(N(i.qty) * N(i.price))}</b></div>`).join('')}${sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount) > 0 ? `<div class="row between small muted"><span>Diskon</span><span>−${money(sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount))}</span></div>` : ''}${t.ref === 'sale' ? `<div class="row between xs muted" style="margin-top:6px"><span>Modal (HPP)</span><span>${money(t.cost)} • laba ${money(N(t.amount) - N(t.cost))}</span></div>` : ''}</div>` : ''}
     <label class="f"><span>Jumlah</span><input class="inp big num ${type === 'in' ? 'c-in' : type === 'out' ? 'c-out' : ''}" name="amount" inputmode="numeric" oninput="mfmt(this)" value="${mval(v.amount)}" placeholder="0" ${lockAmt ? 'readonly' : ''} autofocus></label>
-    ${type !== 'transfer' ? `<label class="f"><span>Kategori</span></label><input type="hidden" name="category_id" value="${v.category_id || ''}">
+    ${type !== 'transfer' && !noCat ? `<label class="f"><span>Kategori</span></label><input type="hidden" name="category_id" value="${v.category_id || ''}">
       <div class="cat-grid" id="catGrid">${cl.map(c => catOpt(c, v.category_id)).join('')}<div class="cat-opt" onclick="quickCat('${type}')"><span class="e">➕</span>Baru</div></div>` : ''}
     <div class="f-row">
       <label class="f"><span>${type === 'transfer' ? 'Dari akun' : type === 'in' ? 'Masuk ke' : 'Dibayar dari'}</span><select class="inp" name="account_id">${S.d.accounts.map(a => `<option value="${a.id}" ${v.account_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
@@ -946,7 +947,8 @@ async function saveTx(id, type) {
   if (!f.date) return toast('Isi tanggal transaksi', true);
   if (!f.account_id) return toast('Pilih akun', true);
   if (t && t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d && N(d.paid) + amount - N(t.amount) > N(d.amount) + 0.5) return toast('Melebihi total ' + (d.kind === 'piutang' ? 'piutang' : 'hutang') + ' (' + money(d.amount) + ')', true); }
-  if (type !== 'transfer' && !f.category_id) return toast('Pilih kategori', true);
+  const noCat = t && (t.ref === 'adjust' || (t.ref === 'debt' && !t.category_id));
+  if (type !== 'transfer' && !noCat && !f.category_id) return toast('Pilih kategori', true);
   if (type === 'transfer' && f.account_id === f.to_account_id) return toast('Akun asal dan tujuan harus berbeda', true);
   const row = { date: f.date, type, amount, account_id: f.account_id, note: f.note.trim(), category_id: type === 'transfer' ? null : f.category_id, to_account_id: type === 'transfer' ? f.to_account_id : null, contact_id: f.contact_id || null };
   const btn = $('#txSave'); busy(btn, true);
@@ -954,7 +956,7 @@ async function saveTx(id, type) {
     if (t) {
       if (t.ref === 'sale' || t.ref === 'purchase') { delete row.amount; delete row.type; }
       if (t.ref === 'debt' && t.debt_id && amount !== N(t.amount)) { const d = byId('debts', t.debt_id); if (d && isDebtPay(t)) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) + amount - N(t.amount)) }); }
-      if (t.ref === 'debt') row.category_id = t.category_id;
+      if (t.ref === 'debt' || t.ref === 'adjust') row.category_id = t.category_id || null;
       await upd('transactions', t.id, row);
     } else await add('transactions', row);
     return true;
@@ -1514,11 +1516,59 @@ async function testNotif() {
   }
   showSysNotif('🔔 ' + S.biz.name, 'Notifikasi BukuKas berfungsi dengan baik!', 'dashboard', 'test-' + Date.now()); toast('Notifikasi uji dikirim');
 }
+/* ---------- ubah nominal saldo akun ---------- */
+function balanceForm(id) {
+  const a = acc(id); if (!a) return; const cur = accBalance(a);
+  modal('Ubah Saldo — ' + esc(a.name), `<form id="blf" onsubmit="event.preventDefault()">
+    <div class="row between mb"><span class="muted small">Saldo tercatat saat ini</span><b class="num">${money(cur)}</b></div>
+    <label class="f"><span>Saldo sebenarnya sekarang</span><input class="inp big num" name="bal" inputmode="numeric" autocomplete="off" value="${mval(Math.max(0, cur))}" oninput="mfmt(this);blCalc(${cur})" autofocus></label>
+    <div class="chips" style="margin-top:-6px"><button type="button" class="chip" onclick="const b=$('#blf [name=bal]');b.value='';blCalc(${cur});b.focus()">Kosongkan</button><button type="button" class="chip" onclick="$('#blf [name=bal]').value='0';blCalc(${cur})">Rp 0</button></div>
+    <div class="row between mb"><span class="muted small">Selisih</span><b class="num" id="blDiff">-</b></div>
+    <label class="f"><span>Cara menyimpan</span></label><input type="hidden" name="mode" value="adjust">
+    <div class="pay-opts" style="grid-template-columns:1fr 1fr"><div class="pay-opt on" data-m="adjust" onclick="blMode(this)">⚖️ Transaksi penyesuaian<br><small class="muted" style="font-weight:500">Disarankan — tercatat di riwayat</small></div><div class="pay-opt" data-m="opening" onclick="blMode(this)">🧮 Ubah saldo awal<br><small class="muted" style="font-weight:500">Tanpa transaksi baru</small></div></div>
+    <div id="blAdj"><div class="f-row"><label class="f"><span>Tanggal</span><input class="inp" type="date" name="date" value="${today()}" max="${addDays(today(), 1)}"></label><label class="f"><span>Keterangan</span><input class="inp" name="note" value="Penyesuaian saldo" maxlength="100"></label></div></div>
+    <p class="xs muted" style="margin:0">Penyesuaian saldo tidak dihitung sebagai pemasukan/pengeluaran di Laba Rugi, hanya mengubah saldo akun & arus kas.</p></form>`,
+    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="bls">${ic('check')} Simpan Saldo</button>`, onMount: m => { m.querySelector('#bls').onclick = () => saveBalance(id); blCalc(cur); } });
+}
+function blMode(el) { $$('#blf .pay-opt').forEach(x => x.classList.toggle('on', x === el)); $('#blf [name=mode]').value = el.dataset.m; $('#blAdj').classList.toggle('hidden', el.dataset.m !== 'adjust'); }
+function blCalc(cur) { const f = formObj($('#blf')), d = parseMoney(f.bal) - cur, el = $('#blDiff'); el.textContent = f.bal === '' ? '-' : d === 0 ? 'Tidak berubah' : (d > 0 ? '+' : '−') + money(Math.abs(d)); el.className = 'num ' + (d > 0 ? 'c-in' : d < 0 ? 'c-out' : ''); }
+async function setBalance(a, target, mode, date, note) {
+  const diff = Math.round(target - accBalance(a)); if (!diff) return false;
+  if (mode === 'opening') await upd('accounts', a.id, { opening_balance: N(a.opening_balance) + diff });
+  else await add('transactions', { date: date || today(), type: diff > 0 ? 'in' : 'out', amount: Math.abs(diff), account_id: a.id, category_id: null, ref: 'adjust', note: note || 'Penyesuaian saldo' });
+  return true;
+}
+async function saveBalance(id) {
+  const a = acc(id), f = formObj($('#blf'));
+  if (f.bal === '') return toast('Isi saldo sebenarnya', true);
+  if (f.mode === 'adjust' && !f.date) return toast('Isi tanggal', true);
+  const target = parseMoney(f.bal); if (target === Math.round(accBalance(a))) { closeModal(); return toast('Saldo tidak berubah'); }
+  const btn = $('#bls'); busy(btn, true);
+  const ok = await safe(() => setBalance(a, target, f.mode, f.date, f.note.trim()), 'Saldo ' + a.name + ' menjadi ' + money(target));
+  busy(btn, false); if (ok !== false) { closeModal(); render(); }
+}
+function balanceAll() {
+  if (!S.d.accounts.length) return toast('Belum ada akun. Tambahkan di Pengaturan.', true);
+  modal('Ubah Saldo Semua Akun', `<form id="baf" onsubmit="event.preventDefault()"><p class="small muted" style="margin-top:0">Isi saldo sebenarnya di setiap akun. Akun yang tidak diubah dibiarkan.</p>
+    ${S.d.accounts.map(a => `<div class="opt-row" style="flex-wrap:wrap"><div class="av" style="width:38px;height:38px;font-size:16px">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'}</div><div class="grow" style="min-width:120px"><b style="font-size:14px">${esc(a.name)}</b><div class="xs muted">Tercatat <span class="num">${money(accBalance(a))}</span></div></div><input class="inp num" style="max-width:170px" name="b_${a.id}" inputmode="numeric" autocomplete="off" value="${mval(Math.max(0, accBalance(a)))}" oninput="mfmt(this);baCalc()" aria-label="Saldo ${esc(a.name)}"></div>`).join('')}
+    <div class="row between mt"><b>Total saldo baru</b><b class="num" id="baTot"></b></div>
+    <div class="f-row mt"><label class="f"><span>Tanggal penyesuaian</span><input class="inp" type="date" name="date" value="${today()}" max="${addDays(today(), 1)}"></label><label class="f"><span>Keterangan</span><input class="inp" name="note" value="Penyesuaian saldo" maxlength="100"></label></div>
+    <p class="xs muted" style="margin:0">Disimpan sebagai transaksi penyesuaian (tidak dihitung laba/rugi).</p></form>`,
+    { wide: true, foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="bas">${ic('check')} Simpan Semua</button>`, onMount: m => { baCalc(); m.querySelector('#bas').onclick = async () => {
+      const f = formObj($('#baf')); if (!f.date) return toast('Isi tanggal', true);
+      const changes = S.d.accounts.filter(a => f['b_' + a.id] !== '' && parseMoney(f['b_' + a.id]) !== Math.round(accBalance(a)));
+      if (!changes.length) { closeModal(); return toast('Tidak ada saldo yang berubah'); }
+      const btn = $('#bas'); busy(btn, true);
+      const ok = await safe(async () => { for (const a of changes) await setBalance(a, parseMoney(f['b_' + a.id]), 'adjust', f.date, f.note.trim()); return true; }, changes.length + ' saldo akun diperbarui');
+      busy(btn, false); if (ok) { closeModal(); render(); } }; } });
+}
+function baCalc() { const f = formObj($('#baf')); $('#baTot').textContent = money(sum(S.d.accounts, a => f['b_' + a.id] === '' ? accBalance(a) : parseMoney(f['b_' + a.id]))); }
 function accountForm(id) {
   const a = id ? acc(id) : { name: '', type: 'kas', opening_balance: '', color: PALETTE[S.d.accounts.length % 12] };
   modal(id ? 'Edit Akun' : 'Akun Baru', `<form id="af"><label class="f"><span>Nama akun</span><input class="inp" name="name" value="${esc(a.name)}" placeholder="cth: Kas Laci, BRI, DANA" required autofocus></label>
     <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[['kas', 'Kas tunai'], ['bank', 'Bank'], ['ewallet', 'E-Wallet / QRIS']].map(([k, l]) => `<option value="${k}" ${a.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${a.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
-    <label class="f"><span>Saldo awal</span>${moneyInput('opening_balance', a.opening_balance)}</label></form>`,
+    ${id ? `<div class="card mb" style="padding:12px;background:var(--surface-2)"><div class="row between"><div><div class="xs muted">Saldo saat ini</div><b class="num" style="font-size:18px">${money(accBalance(a))}</b></div><button type="button" class="btn sm primary" onclick="balanceForm('${id}')">${ic('edit')} Ubah saldo</button></div></div>` : ''}
+    <label class="f"><span>Saldo awal${id ? ' (saldo saat akun dibuat)' : ''}</span>${moneyInput('opening_balance', a.opening_balance)}</label>${id ? '<p class="xs muted" style="margin-top:-6px">Mengubah saldo awal ikut menggeser saldo di semua periode laporan.</p>' : ''}</form>`,
     { foot: `${id ? `<button class="btn danger" onclick="deleteAccount('${id}')">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="afs">Simpan</button>`,
       onMount: m => m.querySelector('#afs').onclick = async () => { const f = formObj($('#af')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), type: f.type, color: f.color, opening_balance: parseMoney(f.opening_balance) };
         const ok = await safe(async () => { if (id) await upd('accounts', id, row); else await add('accounts', row); return true; }, 'Akun disimpan'); if (ok) { closeModal(); render(); } } });
@@ -1772,8 +1822,8 @@ PAGES.pengaturan = {
         <div class="seg">${[['auto', '🌗 Otomatis'], ['light', '☀️ Terang'], ['dark', '🌙 Gelap']].map(([k, l]) => `<button class="${th === k ? 'on' : ''}" onclick="setTheme('${k}')">${l}</button>`).join('')}</div>
         <button class="btn block install-btn ${isStandalone() ? 'hidden' : ''}" onclick="installApp()">${ic('install')} Install aplikasi ke perangkat ini</button></div>
 
-      <div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div>
-        ${S.d.accounts.map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><span class="xs muted">Saldo <span class="num">${money(accBalance(a))}</span></span></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')}</div>
+      <div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><div class="row gap-s"><button class="btn sm" onclick="balanceAll()">${ic('edit')} Ubah saldo</button><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div></div>
+        ${S.d.accounts.map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><button type="button" class="xs" style="background:none;border:0;padding:0;color:var(--primary);font-weight:700;cursor:pointer" onclick="balanceForm('${a.id}')">Saldo <span class="num">${money(accBalance(a))}</span> ✎</button></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')}</div>
 
       <div class="card"><div class="card-h"><h3>🏷️ Kategori</h3><button class="btn sm primary" onclick="catForm(null,S.catTab)">${ic('plus')} Kategori</button></div>
         <div class="seg"><button class="${S.catTab === 'in' ? 'on in' : ''}" onclick="S.catTab='in';render()">⬆ Pemasukan (${cats('in').length})</button><button class="${S.catTab === 'out' ? 'on out' : ''}" onclick="S.catTab='out';render()">⬇ Pengeluaran (${cats('out').length})</button></div>

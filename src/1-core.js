@@ -309,12 +309,13 @@ const openDebts = kind => S.d.debts.filter(d => d.kind === kind && debtLeft(d) >
 function txTitle(t) {
   if (t.type === 'transfer') return 'Transfer Saldo';
   const c = cat(t.category_id);
+  if (t.ref === 'adjust') return 'Penyesuaian Saldo';
   if (t.ref === 'debt') { const d = byId('debts', t.debt_id); if (!isDebtPay(t)) return d && d.kind === 'hutang' ? 'Pinjaman Diterima' : 'Pinjaman Diberikan'; return (t.type === 'in' ? 'Terima ' : 'Bayar ') + (d ? (d.kind === 'piutang' ? 'Piutang' : 'Hutang') : 'Hutang/Piutang'); }
   if (t.ref === 'sale') return c ? c.name : 'Penjualan';
   if (t.ref === 'purchase') return c ? c.name : 'Pembelian Stok';
   return c ? c.name : (t.type === 'in' ? 'Pemasukan' : 'Pengeluaran');
 }
-function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'debt') return '🤝'; const c = cat(t.category_id); return (c && c.icon) || (t.type === 'in' ? '💰' : '🧾'); }
+function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'adjust') return '⚖️'; if (t.ref === 'debt') return '🤝'; const c = cat(t.category_id); return (c && c.icon) || (t.type === 'in' ? '💰' : '🧾'); }
 function catSpend(catId, from, to) { return sum(S.d.transactions.filter(t => t.category_id === catId && t.type === 'out' && inR(t.date, from, to)), t => t.amount); }
 function monthRange(offset = 0) { const d = new Date(today() + 'T00:00:00'); const a = new Date(d.getFullYear(), d.getMonth() + offset, 1), b = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0); return { from: dstr(a), to: dstr(b) }; }
 function metricAgg(m, logs) {

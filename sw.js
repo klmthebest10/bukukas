@@ -1,5 +1,5 @@
 /* BukuKas Pro — Service Worker (offline cache + notifikasi) */
-const VERSION = 'bukukas-v1.3.1';
+const VERSION = 'bukukas-v1.4.0';
 const SHELL = ['./', './index.html', './app.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -67,9 +67,9 @@ PAGES.dashboard = {
     <div class="mb">${periodChips(S.period, 'setPeriod')}</div>
     <div class="grid g-dash mb">
       <div class="hero">
-        <div class="lbl">Total Saldo Usaha</div>
+        <div class="lbl" style="justify-content:space-between">Total Saldo Usaha<button type="button" onclick="balanceAll()" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;padding:4px 10px;font-weight:700;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px">${ic('edit')} Ubah saldo</button></div>
         <div class="val num">${money(bal)}</div>
-        <div class="acc-chips">${S.d.accounts.map(a => `<div class="acc-chip"><small>${esc(a.name)}</small><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div>
+        <div class="acc-chips">${S.d.accounts.map(a => `<div class="acc-chip" role="button" tabindex="0" style="cursor:pointer" title="Ubah saldo ${esc(a.name)}" onclick="balanceForm('${a.id}')"><small>${esc(a.name)} ✎</small><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div>
         <div class="hero-actions">
           <button onclick="txForm(null,'in')">${ic('up')}Pemasukan</button>
           <button onclick="txForm(null,'out')">${ic('down')}Pengeluaran</button>
@@ -205,13 +205,13 @@ function txForm(id, type = 'in', preset = {}) {
   if (!S.d.accounts.length) return toast('Tambahkan akun kas/bank dulu di Pengaturan', true);
   const lockAmt = t && (t.ref === 'sale' || t.ref === 'purchase');
   const v = t || { date: today(), amount: preset.amount || '', category_id: preset.category_id || '', account_id: S.d.accounts[0].id, to_account_id: (S.d.accounts[1] || {}).id, note: '', contact_id: '' };
-  const cl = cats(type === 'transfer' ? 'x' : type);
+  const cl = cats(type === 'transfer' ? 'x' : type), noCat = t && (t.ref === 'adjust' || (t.ref === 'debt' && !t.category_id));
   const title = t ? 'Detail Transaksi' : type === 'in' ? 'Catat Pemasukan' : type === 'out' ? 'Catat Pengeluaran' : 'Transfer Saldo';
   const body = `<form id="txf">
-    ${!t ? `<div class="seg"><button type="button" class="${type === 'in' ? 'on in' : ''}" onclick="txForm(null,'in')">⬆ Pemasukan</button><button type="button" class="${type === 'out' ? 'on out' : ''}" onclick="txForm(null,'out')">⬇ Pengeluaran</button><button type="button" class="${type === 'transfer' ? 'on' : ''}" onclick="txForm(null,'transfer')">🔁 Transfer</button></div>` : `<div class="row mb"><span class="pill ${type === 'in' ? 'in' : type === 'out' ? 'out' : 'info'}">${type === 'in' ? 'Pemasukan' : type === 'out' ? 'Pengeluaran' : 'Transfer'}</span>${t.ref ? `<span class="pill neutral">${t.ref === 'sale' ? 'Penjualan kasir' : t.ref === 'purchase' ? 'Pembelian stok' : 'Hutang/Piutang'}</span>` : ''}</div>`}
+    ${!t ? `<div class="seg"><button type="button" class="${type === 'in' ? 'on in' : ''}" onclick="txForm(null,'in')">⬆ Pemasukan</button><button type="button" class="${type === 'out' ? 'on out' : ''}" onclick="txForm(null,'out')">⬇ Pengeluaran</button><button type="button" class="${type === 'transfer' ? 'on' : ''}" onclick="txForm(null,'transfer')">🔁 Transfer</button></div>` : `<div class="row mb"><span class="pill ${type === 'in' ? 'in' : type === 'out' ? 'out' : 'info'}">${type === 'in' ? 'Pemasukan' : type === 'out' ? 'Pengeluaran' : 'Transfer'}</span>${t.ref ? `<span class="pill neutral">${t.ref === 'sale' ? 'Penjualan kasir' : t.ref === 'purchase' ? 'Pembelian stok' : t.ref === 'adjust' ? 'Penyesuaian saldo — tidak dihitung laba/rugi' : 'Hutang/Piutang'}</span>` : ''}</div>`}
     ${t && t.items ? `<div class="card mb" style="background:var(--surface-2);padding:12px">${t.items.map(i => `<div class="row between small"><span>${esc(i.name)} × ${numf(i.qty, 2)}</span><b class="num">${money(N(i.qty) * N(i.price))}</b></div>`).join('')}${sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount) > 0 ? `<div class="row between small muted"><span>Diskon</span><span>−${money(sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount))}</span></div>` : ''}${t.ref === 'sale' ? `<div class="row between xs muted" style="margin-top:6px"><span>Modal (HPP)</span><span>${money(t.cost)} • laba ${money(N(t.amount) - N(t.cost))}</span></div>` : ''}</div>` : ''}
     <label class="f"><span>Jumlah</span><input class="inp big num ${type === 'in' ? 'c-in' : type === 'out' ? 'c-out' : ''}" name="amount" inputmode="numeric" oninput="mfmt(this)" value="${mval(v.amount)}" placeholder="0" ${lockAmt ? 'readonly' : ''} autofocus></label>
-    ${type !== 'transfer' ? `<label class="f"><span>Kategori</span></label><input type="hidden" name="category_id" value="${v.category_id || ''}">
+    ${type !== 'transfer' && !noCat ? `<label class="f"><span>Kategori</span></label><input type="hidden" name="category_id" value="${v.category_id || ''}">
       <div class="cat-grid" id="catGrid">${cl.map(c => catOpt(c, v.category_id)).join('')}<div class="cat-opt" onclick="quickCat('${type}')"><span class="e">➕</span>Baru</div></div>` : ''}
     <div class="f-row">
       <label class="f"><span>${type === 'transfer' ? 'Dari akun' : type === 'in' ? 'Masuk ke' : 'Dibayar dari'}</span><select class="inp" name="account_id">${S.d.accounts.map(a => `<option value="${a.id}" ${v.account_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
@@ -244,7 +244,8 @@ async function saveTx(id, type) {
   if (!f.date) return toast('Isi tanggal transaksi', true);
   if (!f.account_id) return toast('Pilih akun', true);
   if (t && t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d && N(d.paid) + amount - N(t.amount) > N(d.amount) + 0.5) return toast('Melebihi total ' + (d.kind === 'piutang' ? 'piutang' : 'hutang') + ' (' + money(d.amount) + ')', true); }
-  if (type !== 'transfer' && !f.category_id) return toast('Pilih kategori', true);
+  const noCat = t && (t.ref === 'adjust' || (t.ref === 'debt' && !t.category_id));
+  if (type !== 'transfer' && !noCat && !f.category_id) return toast('Pilih kategori', true);
   if (type === 'transfer' && f.account_id === f.to_account_id) return toast('Akun asal dan tujuan harus berbeda', true);
   const row = { date: f.date, type, amount, account_id: f.account_id, note: f.note.trim(), category_id: type === 'transfer' ? null : f.category_id, to_account_id: type === 'transfer' ? f.to_account_id : null, contact_id: f.contact_id || null };
   const btn = $('#txSave'); busy(btn, true);
@@ -252,7 +253,7 @@ async function saveTx(id, type) {
     if (t) {
       if (t.ref === 'sale' || t.ref === 'purchase') { delete row.amount; delete row.type; }
       if (t.ref === 'debt' && t.debt_id && amount !== N(t.amount)) { const d = byId('debts', t.debt_id); if (d && isDebtPay(t)) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) + amount - N(t.amount)) }); }
-      if (t.ref === 'debt') row.category_id = t.category_id;
+      if (t.ref === 'debt' || t.ref === 'adjust') row.category_id = t.category_id || null;
       await upd('transactions', t.id, row);
     } else await add('transactions', row);
     return true;
