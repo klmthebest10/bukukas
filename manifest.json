@@ -1,0 +1,25 @@
+{
+  "name": "BukuKas Pro — Pembukuan Usaha",
+  "short_name": "BukuKas",
+  "description": "Pembukuan usaha modern: kas, kasir, stok, hutang piutang, catatan produksi & laporan.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#0f766e",
+  "theme_color": "#0f766e",
+  "lang": "id",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Kasir", "url": "./?page=kasir", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Transaksi", "url": "./?page=transaksi", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Laporan", "url": "./?page=laporan", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
