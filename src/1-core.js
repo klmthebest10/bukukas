@@ -406,10 +406,48 @@ function togglePrivacy() { LS.set('bk_privacy', !LS.get('bk_privacy', false)); a
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------------- PWA ---------------- */
+const APP_VERSION = '1.7.1';
+/* Pembaruan otomatis: cek versi baru saat dibuka, saat kembali ke aplikasi & tiap 30 menit.
+   Begitu versi baru aktif, aplikasi memuat ulang sendiri (antrean offline aman di IndexedDB). */
+const Upd = { reg: null, ready: false, reloading: false };
 function registerSW() {
   if (!('serviceWorker' in navigator) || !/^https?:/.test(location.protocol)) return;
-  navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW gagal', e));
-  navigator.serviceWorker.addEventListener && navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.page) go(e.data.page); });
+  const hadCtrl = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+    Upd.reg = reg; reg.update().catch(() => {});
+    setInterval(() => { if (!isOffline()) reg.update().catch(() => {}); }, 30 * 60 * 1000);
+  }).catch(e => console.warn('SW gagal', e));
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadCtrl) updReady(); });
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.page) go(e.data.page); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (Upd.ready) return updApply();
+    if (Upd.reg && !isOffline()) Upd.reg.update().catch(() => {});
+  });
+}
+const busyUI = () => !!document.querySelector('#modal.open') || (S.cart && S.cart.length > 0);
+function updReady() {
+  Upd.ready = true;
+  if (!busyUI()) return updApply();
+  let b = document.getElementById('updBar');
+  if (!b) { b = document.createElement('div'); b.id = 'updBar'; b.className = 'upd-bar'; b.innerHTML = `<span>✨ Versi baru siap dipakai</span><button class="btn sm primary" onclick="updApply()">Muat ulang</button>`; document.body.appendChild(b); }
+}
+function updApply() { if (Upd.reloading) return; Upd.reloading = true; try { Snap.save && Snap.save(); } catch (e) {} setTimeout(() => location.reload(), 150); }
+async function checkUpdate(btn) {
+  if (isOffline()) return toast('Perlu internet untuk memeriksa pembaruan', true);
+  busy(btn, true);
+  try {
+    const r = await fetch('sw.js?cb=' + Date.now(), { cache: 'no-store' }); const t = await r.text();
+    const v = (t.match(/bukukas-v([\d.]+)/) || [])[1];
+    if (v && v !== APP_VERSION) {
+      toast('Memasang versi ' + v + '…');
+      if (Upd.reg) await Upd.reg.update().catch(() => {});
+      if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+      return updApply();
+    }
+    toast('Aplikasi sudah versi terbaru (v' + APP_VERSION + ') ✅');
+  } catch (e) { toast('Gagal memeriksa: ' + humanErr(e), true); }
+  busy(btn, false);
 }
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; $$('.install-btn').forEach(b => b.classList.remove('hidden')); });
 window.addEventListener('appinstalled', () => { S.installEvt = null; toast('Aplikasi berhasil di-install 🎉'); $$('.install-btn').forEach(b => b.classList.add('hidden')); });

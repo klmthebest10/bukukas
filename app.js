@@ -406,10 +406,48 @@ function togglePrivacy() { LS.set('bk_privacy', !LS.get('bk_privacy', false)); a
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------------- PWA ---------------- */
+const APP_VERSION = '1.7.1';
+/* Pembaruan otomatis: cek versi baru saat dibuka, saat kembali ke aplikasi & tiap 30 menit.
+   Begitu versi baru aktif, aplikasi memuat ulang sendiri (antrean offline aman di IndexedDB). */
+const Upd = { reg: null, ready: false, reloading: false };
 function registerSW() {
   if (!('serviceWorker' in navigator) || !/^https?:/.test(location.protocol)) return;
-  navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW gagal', e));
-  navigator.serviceWorker.addEventListener && navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.page) go(e.data.page); });
+  const hadCtrl = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+    Upd.reg = reg; reg.update().catch(() => {});
+    setInterval(() => { if (!isOffline()) reg.update().catch(() => {}); }, 30 * 60 * 1000);
+  }).catch(e => console.warn('SW gagal', e));
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadCtrl) updReady(); });
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.page) go(e.data.page); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (Upd.ready) return updApply();
+    if (Upd.reg && !isOffline()) Upd.reg.update().catch(() => {});
+  });
+}
+const busyUI = () => !!document.querySelector('#modal.open') || (S.cart && S.cart.length > 0);
+function updReady() {
+  Upd.ready = true;
+  if (!busyUI()) return updApply();
+  let b = document.getElementById('updBar');
+  if (!b) { b = document.createElement('div'); b.id = 'updBar'; b.className = 'upd-bar'; b.innerHTML = `<span>✨ Versi baru siap dipakai</span><button class="btn sm primary" onclick="updApply()">Muat ulang</button>`; document.body.appendChild(b); }
+}
+function updApply() { if (Upd.reloading) return; Upd.reloading = true; try { Snap.save && Snap.save(); } catch (e) {} setTimeout(() => location.reload(), 150); }
+async function checkUpdate(btn) {
+  if (isOffline()) return toast('Perlu internet untuk memeriksa pembaruan', true);
+  busy(btn, true);
+  try {
+    const r = await fetch('sw.js?cb=' + Date.now(), { cache: 'no-store' }); const t = await r.text();
+    const v = (t.match(/bukukas-v([\d.]+)/) || [])[1];
+    if (v && v !== APP_VERSION) {
+      toast('Memasang versi ' + v + '…');
+      if (Upd.reg) await Upd.reg.update().catch(() => {});
+      if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+      return updApply();
+    }
+    toast('Aplikasi sudah versi terbaru (v' + APP_VERSION + ') ✅');
+  } catch (e) { toast('Gagal memeriksa: ' + humanErr(e), true); }
+  busy(btn, false);
 }
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; $$('.install-btn').forEach(b => b.classList.remove('hidden')); });
 window.addEventListener('appinstalled', () => { S.installEvt = null; toast('Aplikasi berhasil di-install 🎉'); $$('.install-btn').forEach(b => b.classList.add('hidden')); });
@@ -1898,7 +1936,7 @@ const SET_SECS = [
     ['notif', '🔔', 'Notifikasi & Pengingat', () => notifSet().push ? 'Aktif • jam ' + notifSet().jam : 'Belum aktif'],
     ['tampilan', '🎨', 'Tampilan', () => ({ blue: 'Biru', green: 'Hijau', gold: 'Dark mewah' })[LS.get('bk_accent', 'blue')] + ' • ' + ({ auto: 'otomatis', light: 'terang', dark: 'gelap' })[LS.get('bk_theme', 'auto')]],
     ['keamanan', '🛡️', 'Keamanan & Privasi', () => (Lock.enabled() ? 'PIN aktif' : 'PIN mati') + (LS.get('bk_privacy', false) ? ' • nominal disembunyikan' : '')],
-    ['data', '🗄️', 'Data, Backup & Akun', () => S.mode === 'cloud' ? (S.user && S.user.email) || 'Akun cloud' : 'Mode lokal'],
+    ['data', '🗄️', 'Data, Backup & Akun', () => (S.mode === 'cloud' ? (S.user && S.user.email) || 'Akun cloud' : 'Mode lokal') + ' • v' + APP_VERSION],
   ]],
 ];
 const setSecFind = k => { for (const [, l] of SET_SECS) for (const x of l) if (x[0] === k) return x; return null; };
@@ -1953,6 +1991,7 @@ PAGES.pengaturan = {
       data: () => `<div class="card"><div class="card-h"><h3>🗄️ Data & Akun</h3></div>
         <div class="row wrap"><button class="btn sm" onclick="backup()">${ic('download')} Backup (JSON)</button><label class="btn sm">${ic('upload')} Pulihkan<input type="file" accept=".json,application/json" hidden onchange="restore(this.files[0])"></label><button class="btn sm" onclick="exportCSV(S.d.transactions.slice().sort(sortTx),'semua-transaksi')">${ic('download')} Semua transaksi (CSV)</button></div>
         ${S.mode === 'local' ? `<div class="set-row mt"><div class="t grow"><b>📱 Mode Lokal</b><small>Data hanya ada di perangkat ini</small></div><button class="btn sm" onclick="LS.del('bk_mode');location.reload()">Hubungkan Cloud</button></div>` : `<div class="set-row mt"><div class="t grow"><b>Akun</b><small>${esc(S.user && S.user.email)}</small></div><button class="btn sm" onclick="logout()">${ic('logout')} Keluar</button></div>`}
+        <div class="set-row mt"><div class="t grow"><b>Versi aplikasi</b><small>BukuKas Pro v${APP_VERSION} • pembaruan dipasang otomatis</small></div><button class="btn sm" onclick="checkUpdate(this)">${ic('refresh')} Periksa pembaruan</button></div>
         <div class="alert-item lv-danger mt" style="cursor:default;flex-direction:column"><b>Zona berbahaya</b><small>Tindakan di bawah tidak bisa dibatalkan.</small><div class="row wrap" style="margin-top:8px"><button class="btn sm danger" onclick="clearData()">Kosongkan data transaksi</button><button class="btn sm danger solid" onclick="deleteBiz()">${ic('trash')} Hapus usaha ini</button></div></div></div>`,
     };
     const menu = SET_SECS.map(([g, l]) => `<div class="set-grp">${g}</div>` + l.map(([k, e, t, d]) => `<button type="button" class="set-item ${cur === k ? 'on' : ''}" onclick="openSet('${k}')"><span class="e">${e}</span><span class="grow" style="min-width:0"><b class="ell">${t}</b><small class="ell">${esc(d())}</small></span><span class="go">${ic('chev')}</span></button>`).join('')).join('');

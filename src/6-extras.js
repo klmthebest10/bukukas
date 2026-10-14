@@ -185,7 +185,7 @@ const SET_SECS = [
     ['notif', '🔔', 'Notifikasi & Pengingat', () => notifSet().push ? 'Aktif • jam ' + notifSet().jam : 'Belum aktif'],
     ['tampilan', '🎨', 'Tampilan', () => ({ blue: 'Biru', green: 'Hijau', gold: 'Dark mewah' })[LS.get('bk_accent', 'blue')] + ' • ' + ({ auto: 'otomatis', light: 'terang', dark: 'gelap' })[LS.get('bk_theme', 'auto')]],
     ['keamanan', '🛡️', 'Keamanan & Privasi', () => (Lock.enabled() ? 'PIN aktif' : 'PIN mati') + (LS.get('bk_privacy', false) ? ' • nominal disembunyikan' : '')],
-    ['data', '🗄️', 'Data, Backup & Akun', () => S.mode === 'cloud' ? (S.user && S.user.email) || 'Akun cloud' : 'Mode lokal'],
+    ['data', '🗄️', 'Data, Backup & Akun', () => (S.mode === 'cloud' ? (S.user && S.user.email) || 'Akun cloud' : 'Mode lokal') + ' • v' + APP_VERSION],
   ]],
 ];
 const setSecFind = k => { for (const [, l] of SET_SECS) for (const x of l) if (x[0] === k) return x; return null; };
@@ -240,6 +240,7 @@ PAGES.pengaturan = {
       data: () => `<div class="card"><div class="card-h"><h3>🗄️ Data & Akun</h3></div>
         <div class="row wrap"><button class="btn sm" onclick="backup()">${ic('download')} Backup (JSON)</button><label class="btn sm">${ic('upload')} Pulihkan<input type="file" accept=".json,application/json" hidden onchange="restore(this.files[0])"></label><button class="btn sm" onclick="exportCSV(S.d.transactions.slice().sort(sortTx),'semua-transaksi')">${ic('download')} Semua transaksi (CSV)</button></div>
         ${S.mode === 'local' ? `<div class="set-row mt"><div class="t grow"><b>📱 Mode Lokal</b><small>Data hanya ada di perangkat ini</small></div><button class="btn sm" onclick="LS.del('bk_mode');location.reload()">Hubungkan Cloud</button></div>` : `<div class="set-row mt"><div class="t grow"><b>Akun</b><small>${esc(S.user && S.user.email)}</small></div><button class="btn sm" onclick="logout()">${ic('logout')} Keluar</button></div>`}
+        <div class="set-row mt"><div class="t grow"><b>Versi aplikasi</b><small>BukuKas Pro v${APP_VERSION} • pembaruan dipasang otomatis</small></div><button class="btn sm" onclick="checkUpdate(this)">${ic('refresh')} Periksa pembaruan</button></div>
         <div class="alert-item lv-danger mt" style="cursor:default;flex-direction:column"><b>Zona berbahaya</b><small>Tindakan di bawah tidak bisa dibatalkan.</small><div class="row wrap" style="margin-top:8px"><button class="btn sm danger" onclick="clearData()">Kosongkan data transaksi</button><button class="btn sm danger solid" onclick="deleteBiz()">${ic('trash')} Hapus usaha ini</button></div></div></div>`,
     };
     const menu = SET_SECS.map(([g, l]) => `<div class="set-grp">${g}</div>` + l.map(([k, e, t, d]) => `<button type="button" class="set-item ${cur === k ? 'on' : ''}" onclick="openSet('${k}')"><span class="e">${e}</span><span class="grow" style="min-width:0"><b class="ell">${t}</b><small class="ell">${esc(d())}</small></span><span class="go">${ic('chev')}</span></button>`).join('')).join('');
