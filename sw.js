@@ -1,9 +1,11 @@
 /* BukuKas Pro — Service Worker (offline cache + notifikasi) */
-const VERSION = 'bukukas-v1.4.0';
+const VERSION = 'bukukas-v1.5.0';
 const SHELL = ['./', './index.html', './app.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
+/* pustaka dari CDN ikut disimpan sejak awal agar aplikasi bisa dibuka offline */
+const CDN = ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2', 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js', 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => Promise.all([c.addAll(SHELL), ...CDN.map(u => fetch(new Request(u, { mode: 'no-cors' })).then(r => c.put(u, r)).catch(() => {}))])).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));

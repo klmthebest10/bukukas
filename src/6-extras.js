@@ -2,7 +2,7 @@
    PENGATURAN, DAFTAR PILIHAN, USAHA & BUKU, KEAMANAN (PIN & PRIVASI)
    ===================================================================== */
 const bizTypeLabel = b => (b && b.settings && b.settings.typeLabel) || (TEMPLATES[b && b.type] || TEMPLATES.umum).label;
-const secBadge = () => `<div class="sec-badge ${S.mode === 'cloud' ? '' : 'local'}" title="${S.mode === 'cloud' ? 'Koneksi HTTPS terenkripsi; data dilindungi Row Level Security (hanya akun Anda yang bisa membaca)' : 'Data hanya tersimpan di browser perangkat ini'}">${ic('shield')}<span>${S.mode === 'cloud' ? 'Tersinkron & terenkripsi' : 'Tersimpan di perangkat ini'}</span>${Lock.enabled() ? ic('lock') : ''}</div>`;
+const secBadge = () => S.mode === 'cloud' && (isOffline() || S.offline) ? `<div class="sec-badge local" title="Perubahan disimpan di perangkat & dikirim otomatis saat online">${ic('cloudoff')}<span>Offline • data aman di perangkat</span></div>` : `<div class="sec-badge ${S.mode === 'cloud' ? '' : 'local'}" title="${S.mode === 'cloud' ? 'Koneksi HTTPS terenkripsi; data dilindungi Row Level Security (hanya akun Anda yang bisa membaca)' : 'Data hanya tersimpan di browser perangkat ini'}">${ic('shield')}<span>${S.mode === 'cloud' ? 'Tersinkron & terenkripsi' : 'Tersimpan di perangkat ini'}</span>${Lock.enabled() ? ic('lock') : ''}</div>`;
 function cacheBizSummary() { if (!S.biz) return; const mr = monthRange(0); LS.set('bk_sum_' + S.biz.id, { bal: totalBalance(), profit: totals(mr.from, mr.to).profit, at: Date.now() }); }
 window.addEventListener('scroll', () => { const t = $('.topbar'); if (t) t.classList.toggle('scrolled', window.scrollY > 8); }, { passive: true });
 
@@ -208,5 +208,3 @@ function listsCard() {
     ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
 }
 
-/* jalankan */
-boot();

@@ -132,6 +132,7 @@ async function applyTemplateExtras(type) {
 async function setMod(k, v) { if (mods()[k] === v) return; S.biz.settings.mods = { ...mods(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); shell(); render(); }
 async function setNotif(k, v) { if (notifSet()[k] === v) return; S.biz.settings.notif = { ...notifSet(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); updateBell(); if (k === 'push') render(); }
 async function testNotif() {
+  if (S.mode === 'cloud' && (isOffline() || S.offline)) return toast('Notifikasi uji membutuhkan koneksi internet', true);
   if (!('Notification' in window) || Notification.permission !== 'granted') { const ok = await enablePush(); if (!ok) return; }
   if (S.mode === 'cloud' && (serverPush() || await subscribePush(false))) {
     const { data, error } = await S.sb.functions.invoke('send-reminders', { body: { test: true } });
@@ -231,6 +232,7 @@ function backup() { download('backup-' + S.biz.name.replace(/\W+/g, '_') + '-' +
 async function restore(file) {
   if (!file) return; let j; try { j = JSON.parse(await file.text()); } catch (e) { return toast('File backup tidak valid', true); }
   if (j.app !== 'bukukas' || !j.data) return toast('Bukan file backup BukuKas', true);
+  if (S.mode === 'cloud') { try { needOnline('Pulihkan backup'); } catch (e) { return toast(e.message, true); } }
   confirmBox(`Pulihkan backup <b>${esc(j.business && j.business.name)}</b> (${fmtDate(String(j.at).slice(0, 10))})? <br>Semua data usaha <b>${esc(S.biz.name)}</b> saat ini akan <b>diganti</b>.`, async () => {
     screen('<div class="loader"></div>');
     try {
@@ -245,6 +247,7 @@ async function restore(file) {
   }, 'Pulihkan');
 }
 function clearData() {
+  if (S.mode === 'cloud') { try { needOnline('Kosongkan data'); } catch (e) { return toast(e.message, true); } }
   confirmBox('Hapus <b>semua transaksi, hutang/piutang, catatan harian & riwayat stok</b> usaha ini? Akun, kategori, produk & kontak tetap ada. Tindakan ini tidak bisa dibatalkan.', async () => {
     await safe(async () => {
       const ts = ['transactions', 'stock_moves', 'debts', 'production_logs'];

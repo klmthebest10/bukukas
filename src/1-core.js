@@ -94,6 +94,10 @@ const ICONS = {
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   install: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>',
+  cloud: '<path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="m9.5 14 2 2 3.5-3.5"/>',
+  cloudoff: '<path d="M3 3l18 18M8.1 9.1A5 5 0 0 0 7 19h10.5c.6 0 1.2-.1 1.7-.4M21.6 15.4A4 4 0 0 0 19.6 11a6 6 0 0 0-8.9-4.6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5"/>',
   store: '<path d="M3 9 4.5 4h15L21 9"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13v8h14v-8M10 21v-5h4v5"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff: '<path d="M9.9 4.2A10 10 0 0 1 12 4c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.4 4.5-1.1M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
@@ -210,7 +214,7 @@ const Cloud = {
   async clearBiz(bizId) { for (const t of [...TABLES].reverse()) { const { error } = await S.sb.from(t).delete().eq('business_id', bizId); if (error) throw error; } },
   async removeBiz(bizId) { const { error } = await S.sb.from('businesses').delete().eq('id', bizId); if (error) throw error; }
 };
-const B = () => S.mode === 'cloud' ? Cloud : Local;
+const B = () => S.mode === 'cloud' ? CloudSync : Local; /* CloudSync: lihat 7-sync.js (online + offline) */
 
 /* operasi data (tulis ke backend + memori) */
 function stamp(row) { return { id: uid(), business_id: S.biz.id, created_at: new Date().toISOString(), ...row }; }
@@ -220,7 +224,7 @@ async function upd(t, id, patch) { await B().update(t, id, patch); const r = S.d
 async function del(t, id) { await B().remove(t, id); S.d[t] = S.d[t].filter(x => x.id !== id); dataChanged(); }
 /* simpan pengaturan usaha berurutan (tidak saling menimpa) */
 let _bizQ = Promise.resolve();
-function updBiz(patch) { const id = S.biz.id; Object.assign(S.biz, patch); const p = _bizQ.then(() => B().update('businesses', id, patch)); _bizQ = p.catch(() => {}); return p; }
+function updBiz(patch) { const id = S.biz.id; Object.assign(S.biz, patch); if (typeof Snap !== 'undefined') Snap.save(); const p = _bizQ.then(() => B().update('businesses', id, patch)); _bizQ = p.catch(() => {}); return p; }
 /* terjemahkan pesan error teknis menjadi bahasa yang mudah dipahami */
 function humanErr(e) {
   const m = String((e && (e.message || e.error_description)) || e || '');
@@ -237,7 +241,6 @@ function humanErr(e) {
   return m || 'Terjadi kesalahan';
 }
 async function safe(fn, okMsg) {
-  if (S.mode === 'cloud' && navigator.onLine === false) { toast('Tidak ada koneksi internet. Data belum tersimpan — coba lagi saat online.', true); return false; }
   try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { console.error(e); toast('Gagal: ' + humanErr(e), true); return false; }
 }
 /* fetch dengan percobaan ulang otomatis saat sinyal putus sesaat */
@@ -247,8 +250,7 @@ async function fetchRetry(input, init) {
     catch (e) { if (i >= 3 || (init && init.signal && init.signal.aborted)) throw e; await new Promise(r => setTimeout(r, 600 * (i + 1))); }
   }
 }
-window.addEventListener('offline', () => { toast('⚠️ Anda sedang offline', true); const t = $('.topbar'); t && t.classList.add('is-offline'); });
-window.addEventListener('online', () => { toast('✅ Kembali online'); const t = $('.topbar'); t && t.classList.remove('is-offline'); });
+
 
 /* lookups */
 const byId = (t, id) => S.d[t].find(x => x.id === id);

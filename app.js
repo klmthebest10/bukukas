@@ -94,6 +94,10 @@ const ICONS = {
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   install: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>',
+  cloud: '<path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="m9.5 14 2 2 3.5-3.5"/>',
+  cloudoff: '<path d="M3 3l18 18M8.1 9.1A5 5 0 0 0 7 19h10.5c.6 0 1.2-.1 1.7-.4M21.6 15.4A4 4 0 0 0 19.6 11a6 6 0 0 0-8.9-4.6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5"/>',
   store: '<path d="M3 9 4.5 4h15L21 9"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13v8h14v-8M10 21v-5h4v5"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff: '<path d="M9.9 4.2A10 10 0 0 1 12 4c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.4 4.5-1.1M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
@@ -210,7 +214,7 @@ const Cloud = {
   async clearBiz(bizId) { for (const t of [...TABLES].reverse()) { const { error } = await S.sb.from(t).delete().eq('business_id', bizId); if (error) throw error; } },
   async removeBiz(bizId) { const { error } = await S.sb.from('businesses').delete().eq('id', bizId); if (error) throw error; }
 };
-const B = () => S.mode === 'cloud' ? Cloud : Local;
+const B = () => S.mode === 'cloud' ? CloudSync : Local; /* CloudSync: lihat 7-sync.js (online + offline) */
 
 /* operasi data (tulis ke backend + memori) */
 function stamp(row) { return { id: uid(), business_id: S.biz.id, created_at: new Date().toISOString(), ...row }; }
@@ -220,7 +224,7 @@ async function upd(t, id, patch) { await B().update(t, id, patch); const r = S.d
 async function del(t, id) { await B().remove(t, id); S.d[t] = S.d[t].filter(x => x.id !== id); dataChanged(); }
 /* simpan pengaturan usaha berurutan (tidak saling menimpa) */
 let _bizQ = Promise.resolve();
-function updBiz(patch) { const id = S.biz.id; Object.assign(S.biz, patch); const p = _bizQ.then(() => B().update('businesses', id, patch)); _bizQ = p.catch(() => {}); return p; }
+function updBiz(patch) { const id = S.biz.id; Object.assign(S.biz, patch); if (typeof Snap !== 'undefined') Snap.save(); const p = _bizQ.then(() => B().update('businesses', id, patch)); _bizQ = p.catch(() => {}); return p; }
 /* terjemahkan pesan error teknis menjadi bahasa yang mudah dipahami */
 function humanErr(e) {
   const m = String((e && (e.message || e.error_description)) || e || '');
@@ -237,7 +241,6 @@ function humanErr(e) {
   return m || 'Terjadi kesalahan';
 }
 async function safe(fn, okMsg) {
-  if (S.mode === 'cloud' && navigator.onLine === false) { toast('Tidak ada koneksi internet. Data belum tersimpan — coba lagi saat online.', true); return false; }
   try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { console.error(e); toast('Gagal: ' + humanErr(e), true); return false; }
 }
 /* fetch dengan percobaan ulang otomatis saat sinyal putus sesaat */
@@ -247,8 +250,7 @@ async function fetchRetry(input, init) {
     catch (e) { if (i >= 3 || (init && init.signal && init.signal.aborted)) throw e; await new Promise(r => setTimeout(r, 600 * (i + 1))); }
   }
 }
-window.addEventListener('offline', () => { toast('⚠️ Anda sedang offline', true); const t = $('.topbar'); t && t.classList.add('is-offline'); });
-window.addEventListener('online', () => { toast('✅ Kembali online'); const t = $('.topbar'); t && t.classList.remove('is-offline'); });
+
 
 /* lookups */
 const byId = (t, id) => S.d[t].find(x => x.id === id);
@@ -386,12 +388,18 @@ async function boot() {
   const mode = LS.get('bk_mode', null), cfg = getCfg();
   if (mode === 'local') { S.mode = 'local'; return afterAuth(); }
   if (cfg.url && cfg.key) {
+    if (!window.supabase && LS.get('bk_last_user', null)) { S.mode = 'cloud'; S.offline = true; S.user = LS.get('bk_last_user'); return afterAuth(); }
     if (!window.supabase) { screen(`<div class="auth-card">${brandHTML()}<p>Tidak bisa memuat pustaka Supabase. Periksa koneksi internet lalu muat ulang.</p><button class="btn primary block" onclick="location.reload()">Muat ulang</button><button class="btn block mt" onclick="useLocal()">Pakai Mode Lokal</button></div>`); return; }
     try { S.sb = supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, global: { fetch: fetchRetry } }); } catch (e) { LS.del('bk_cfg'); return showSetup('URL/kunci Supabase tidak valid.'); }
     S.mode = 'cloud';
     S.sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => changePass(true), 400); });
-    const { data } = await S.sb.auth.getSession();
-    if (data && data.session) { S.user = data.session.user; return afterAuth(); }
+    let session = null, serr = null;
+    try { const r = await S.sb.auth.getSession(); session = r.data && r.data.session; serr = r.error; } catch (e) { serr = e; }
+    if (session) { S.user = session.user; return afterAuth(); }
+    /* offline / sinyal putus: buka dengan data tersimpan di perangkat */
+    const lu = LS.get('bk_last_user', null);
+    if (lu && (isOffline() || (serr && isNetErr(serr)))) { S.user = lu; S.offline = true; return afterAuth(); }
+    if (isOffline()) { screen(`<div class="auth-card">${brandHTML()}<p><b>Anda sedang offline.</b><br><span class="muted small">Masuk pertama kali membutuhkan internet. Setelah itu aplikasi bisa dipakai offline.</span></p><button class="btn primary block" onclick="location.reload()">Coba lagi</button></div>`); return; }
     return showAuth();
   }
   showSetup();
@@ -465,17 +473,21 @@ function changePass(recovery) {
       if (error) return toast(error.message, true); closeModal(); toast('Kata sandi berhasil diperbarui 🔐'); } });
 }
 async function logout(all) {
-  confirmBox(all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?', async () => {
+  const pend = S.mode === 'cloud' ? Sync.q.length : 0;
+  if (pend && !isOffline()) { await Sync.flush(); }
+  const left = S.mode === 'cloud' ? Sync.q.length : 0;
+  confirmBox((all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?') + (left ? `<div class="alert-item lv-danger mt" style="cursor:default"><div class="ai">⚠️</div><div><b>${left} perubahan belum tersinkron</b><small>Jika keluar sekarang, perubahan offline itu akan hilang. Sebaiknya sambungkan internet dulu.</small></div></div>` : ''), async () => {
     LS.del('bk_pin');
-    if (S.mode === 'cloud') await S.sb.auth.signOut(all ? { scope: 'global' } : undefined); else LS.del('bk_mode');
+    if (S.mode === 'cloud') { const uid = S.user && S.user.id; LS.del('bk_last_user'); if (uid) await IDB.clearUser(uid); try { if (S.sb) await S.sb.auth.signOut(all ? { scope: 'global' } : undefined); } catch (e) {} } else LS.del('bk_mode');
     location.reload();
   }, 'Keluar');
 }
 
 async function afterAuth() {
   screen('<div class="loader"></div>');
+  if (S.mode === 'cloud' && S.user) { LS.set('bk_last_user', { id: S.user.id, email: S.user.email }); await Sync.init(S.user.id); }
   try { S.businesses = (await B().listBiz()).map(normalizeBiz); }
-  catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><p class="small muted">Pastikan file <b>schema.sql</b> sudah dijalankan di Supabase SQL Editor.</p><button class="btn primary block" onclick="location.reload()">Coba lagi</button><button class="btn block mt" onclick="S.sb.auth.signOut().then(()=>location.reload())">Keluar</button></div>`); return; }
+  catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><p class="small muted">${isNetErr(e) ? 'Data usaha belum pernah tersimpan di perangkat ini. Buka sekali saat online agar bisa dipakai offline.' : 'Pastikan file <b>schema.sql</b> sudah dijalankan di Supabase SQL Editor.'}</p><button class="btn primary block" onclick="location.reload()">Coba lagi</button><button class="btn block mt" onclick="S.sb.auth.signOut().then(()=>location.reload())">Keluar</button></div>`); return; }
   if (!S.businesses.length) return showWizard();
   const last = LS.get('bk_biz'); await openBiz(S.businesses.find(b => b.id === last) || S.businesses[0]);
 }
@@ -484,6 +496,7 @@ async function openBiz(b) {
   try { S.d = await B().load(b.id); } catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data usaha.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><button class="btn primary block" onclick="openBiz(S.businesses.find(x=>x.id==='${b.id}')||S.biz)">Coba lagi</button></div>`); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
   shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
+  if (S.mode === 'cloud') { Sync.ui(); if (S.offline) toast('📴 Mode offline — data dari perangkat ini. Perubahan dikirim otomatis saat online.'); else setTimeout(() => Sync.flush(), 1200); }
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
 }
 
@@ -577,6 +590,7 @@ function shell() {
       <button class="icon-btn mob-only" onclick="openSide()" aria-label="Menu">${ic('menu')}</button>
       <div class="grow"><h2 id="pgTitle"></h2><div class="sub" id="pgSub"></div></div>
       <div id="topExtra" class="row desk-only"></div>
+      ${S.mode === 'cloud' ? '<button class="sync-pill" id="syncBtn" onclick="syncInfo()" aria-label="Status sinkronisasi"></button>' : ''}
       <button class="icon-btn ${LS.get('bk_privacy', false) ? 'on' : ''}" id="privBtn" onclick="togglePrivacy()" title="Sembunyikan / tampilkan nominal" aria-label="Sembunyikan nominal">${ic(LS.get('bk_privacy', false) ? 'eyeoff' : 'eye')}</button>
       <button class="icon-btn" onclick="openAlerts()" aria-label="Notifikasi">${ic('bell')}<span class="badge hidden" id="bellBadge"></span></button>
       <button class="btn primary desk-only" onclick="quickAdd()">${ic('plus')} Catat</button>
@@ -603,10 +617,10 @@ function render() {
   $('#topExtra').innerHTML = '';
   $('#content').innerHTML = pg.html();
   pg.mount && pg.mount();
-  updateBell(); cacheBizSummary();
+  updateBell(); cacheBizSummary(); Sync.ui();
 }
 function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam') + ' 👋 ' + fmtDay(today()); }
-let _dc; function dataChanged() { clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
+let _dc; function dataChanged() { Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
   modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
@@ -679,7 +693,7 @@ async function showSysNotif(title, body, page, tag) {
 const serverPush = () => S.mode === 'cloud' && LS.get('bk_server_push', false);
 const b64u = s => { const r = atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, c => c.charCodeAt(0)); };
 async function subscribePush(silent) {
-  if (S.mode !== 'cloud' || !CONFIG.VAPID_PUBLIC_KEY || !('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  if (S.mode !== 'cloud' || isOffline() || S.offline || !S.sb || !CONFIG.VAPID_PUBLIC_KEY || !('serviceWorker' in navigator) || !('PushManager' in window)) return false;
   try {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
@@ -1508,6 +1522,7 @@ async function applyTemplateExtras(type) {
 async function setMod(k, v) { if (mods()[k] === v) return; S.biz.settings.mods = { ...mods(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); shell(); render(); }
 async function setNotif(k, v) { if (notifSet()[k] === v) return; S.biz.settings.notif = { ...notifSet(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); updateBell(); if (k === 'push') render(); }
 async function testNotif() {
+  if (S.mode === 'cloud' && (isOffline() || S.offline)) return toast('Notifikasi uji membutuhkan koneksi internet', true);
   if (!('Notification' in window) || Notification.permission !== 'granted') { const ok = await enablePush(); if (!ok) return; }
   if (S.mode === 'cloud' && (serverPush() || await subscribePush(false))) {
     const { data, error } = await S.sb.functions.invoke('send-reminders', { body: { test: true } });
@@ -1607,6 +1622,7 @@ function backup() { download('backup-' + S.biz.name.replace(/\W+/g, '_') + '-' +
 async function restore(file) {
   if (!file) return; let j; try { j = JSON.parse(await file.text()); } catch (e) { return toast('File backup tidak valid', true); }
   if (j.app !== 'bukukas' || !j.data) return toast('Bukan file backup BukuKas', true);
+  if (S.mode === 'cloud') { try { needOnline('Pulihkan backup'); } catch (e) { return toast(e.message, true); } }
   confirmBox(`Pulihkan backup <b>${esc(j.business && j.business.name)}</b> (${fmtDate(String(j.at).slice(0, 10))})? <br>Semua data usaha <b>${esc(S.biz.name)}</b> saat ini akan <b>diganti</b>.`, async () => {
     screen('<div class="loader"></div>');
     try {
@@ -1621,6 +1637,7 @@ async function restore(file) {
   }, 'Pulihkan');
 }
 function clearData() {
+  if (S.mode === 'cloud') { try { needOnline('Kosongkan data'); } catch (e) { return toast(e.message, true); } }
   confirmBox('Hapus <b>semua transaksi, hutang/piutang, catatan harian & riwayat stok</b> usaha ini? Akun, kategori, produk & kontak tetap ada. Tindakan ini tidak bisa dibatalkan.', async () => {
     await safe(async () => {
       const ts = ['transactions', 'stock_moves', 'debts', 'production_logs'];
@@ -1643,7 +1660,7 @@ function deleteBiz(id) {
    PENGATURAN, DAFTAR PILIHAN, USAHA & BUKU, KEAMANAN (PIN & PRIVASI)
    ===================================================================== */
 const bizTypeLabel = b => (b && b.settings && b.settings.typeLabel) || (TEMPLATES[b && b.type] || TEMPLATES.umum).label;
-const secBadge = () => `<div class="sec-badge ${S.mode === 'cloud' ? '' : 'local'}" title="${S.mode === 'cloud' ? 'Koneksi HTTPS terenkripsi; data dilindungi Row Level Security (hanya akun Anda yang bisa membaca)' : 'Data hanya tersimpan di browser perangkat ini'}">${ic('shield')}<span>${S.mode === 'cloud' ? 'Tersinkron & terenkripsi' : 'Tersimpan di perangkat ini'}</span>${Lock.enabled() ? ic('lock') : ''}</div>`;
+const secBadge = () => S.mode === 'cloud' && (isOffline() || S.offline) ? `<div class="sec-badge local" title="Perubahan disimpan di perangkat & dikirim otomatis saat online">${ic('cloudoff')}<span>Offline • data aman di perangkat</span></div>` : `<div class="sec-badge ${S.mode === 'cloud' ? '' : 'local'}" title="${S.mode === 'cloud' ? 'Koneksi HTTPS terenkripsi; data dilindungi Row Level Security (hanya akun Anda yang bisa membaca)' : 'Data hanya tersimpan di browser perangkat ini'}">${ic('shield')}<span>${S.mode === 'cloud' ? 'Tersinkron & terenkripsi' : 'Tersimpan di perangkat ini'}</span>${Lock.enabled() ? ic('lock') : ''}</div>`;
 function cacheBizSummary() { if (!S.biz) return; const mr = monthRange(0); LS.set('bk_sum_' + S.biz.id, { bal: totalBalance(), profit: totals(mr.from, mr.to).profit, at: Date.now() }); }
 window.addEventListener('scroll', () => { const t = $('.topbar'); if (t) t.classList.toggle('scrolled', window.scrollY > 8); }, { passive: true });
 
@@ -1848,6 +1865,191 @@ function listsCard() {
     <form class="row mb" onsubmit="event.preventDefault();listAdd('${k}',this.v.value)"><input class="inp" name="v" placeholder="Tambah ${word} baru…" maxlength="40"><button class="btn primary" aria-label="Tambah">${ic('plus')}</button></form>
     ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
 }
+
+/* =====================================================================
+   MODE ONLINE + OFFLINE untuk akun cloud
+   - Data usaha disimpan juga di perangkat (IndexedDB) → aplikasi tetap
+     terbuka & bisa dipakai tanpa internet.
+   - Perubahan saat offline masuk ANTREAN dan otomatis dikirim ke server
+     ketika internet kembali (urutan tetap terjaga).
+   ===================================================================== */
+const IDB = {
+  db: null,
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    return new Promise((res, rej) => {
+      if (!('indexedDB' in window)) return rej(new Error('no idb'));
+      const r = indexedDB.open('bukukas', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => { this.db = r.result; res(this.db); };
+      r.onerror = () => rej(r.error);
+    });
+  },
+  async get(k) {
+    try { const db = await this.open(); return await new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+    catch (e) { return LS.get('idb_' + k, undefined); }
+  },
+  async set(k, v) {
+    try { const db = await this.open(); await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+    catch (e) { LS.set('idb_' + k, v); }
+  },
+  async del(k) {
+    try { const db = await this.open(); await new Promise((res) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete = () => res(); tx.onerror = () => res(); }); } catch (e) {}
+    LS.del('idb_' + k);
+  },
+  async clearUser(uid) {
+    try { const db = await this.open(); await new Promise((res) => { const tx = db.transaction('kv', 'readwrite'); const st = tx.objectStore('kv'); const q = st.openCursor(); q.onsuccess = () => { const c = q.result; if (!c) return; if (String(c.key).includes(uid)) c.delete(); c.continue(); }; tx.oncomplete = () => res(); tx.onerror = () => res(); }); } catch (e) {}
+  }
+};
+
+/* salinan data di perangkat (snapshot) */
+const Snap = {
+  k(id) { return 'snap:' + (S.user && S.user.id) + ':' + id; },
+  async get(id) { return IDB.get(this.k(id)); },
+  async put(id, v) { if (S.mode === 'cloud' && S.user) await IDB.set(this.k(id), v); },
+  _t: null,
+  save() { if (S.mode !== 'cloud' || !S.user) return; clearTimeout(this._t); this._t = setTimeout(() => { if (S.biz) this.put(S.biz.id, JSON.parse(JSON.stringify(S.d))); this.put('biz', JSON.parse(JSON.stringify(S.businesses))); }, 300); }
+};
+
+const isOffline = () => navigator.onLine === false;
+const isNetErr = e => { const m = String((e && (e.message || e.details)) || e || ''); return isOffline() || /load failed|failed to fetch|networkerror|network request failed|fetch failed|timed? ?out|aborted|err_internet|err_network/i.test(m); };
+
+/* antrean perubahan yang belum terkirim */
+const Sync = {
+  q: [], busy: false, uid: null, failed: [],
+  key() { return 'outbox:' + this.uid; },
+  async init(uid) { this.uid = uid; this.q = (await IDB.get(this.key())) || []; this.failed = (await IDB.get('failed:' + uid)) || []; this.ui(); },
+  async save() { if (this.uid) { await IDB.set(this.key(), this.q); await IDB.set('failed:' + this.uid, this.failed); } this.ui(); },
+  /* gabungkan perubahan berulang pada data yang sama agar antrean tetap ringkas */
+  async push(op) {
+    const same = (o, t, id) => o.t === t && ((o.op === 'update' || o.op === 'delete') ? o.id === id : (o.rows || []).some(r => r.id === id));
+    if (op.op === 'update') {
+      for (let i = this.q.length - 1; i >= 0; i--) {
+        const o = this.q[i]; if (!same(o, op.t, op.id)) continue;
+        if (o.op === 'delete') break;
+        if (o.op === 'upsert') { const r = o.rows.find(r => r.id === op.id); Object.assign(r, strip(op.patch)); return this.save(); }
+        if (o.op === 'update') { Object.assign(o.patch, op.patch); return this.save(); }
+      }
+    }
+    if (op.op === 'delete') {
+      this.q = this.q.filter(o => !(o.op === 'update' && o.t === op.t && o.id === op.id)).map(o => (o.op === 'upsert' && o.t === op.t) ? { ...o, rows: o.rows.filter(r => r.id !== op.id) } : o).filter(o => o.op !== 'upsert' || o.rows.length);
+    }
+    if (op.op === 'upsert') op = { ...op, rows: op.rows.map(strip) };
+    this.q.push({ ...op, ts: Date.now() }); await this.save();
+  },
+  run(op) {
+    if (op.op === 'upsert') return Cloud.insert(op.t, op.rows);
+    if (op.op === 'update') return Cloud.update(op.t, op.id, op.patch);
+    if (op.op === 'delete') return Cloud.remove(op.t, op.id);
+  },
+  /* dipanggil setiap ada perubahan data: kirim langsung bila online, antre bila offline */
+  async exec(op) {
+    if (this.q.length || isOffline() || !S.sb) { await this.push(op); this.flushSoon(); return null; }
+    try { return await this.run(op); }
+    catch (e) { if (isNetErr(e)) { await this.push(op); this.flushSoon(); return null; } throw e; }
+  },
+  flushSoon(ms = 1500) { clearTimeout(this._t); this._t = setTimeout(() => this.flush(), ms); },
+  async flush(manual) {
+    if (this.busy || S.mode !== 'cloud' || !S.sb) return;
+    if (!this.q.length) { if (manual) toast('Semua data sudah tersinkron ✅'); return; }
+    if (isOffline()) { if (manual) toast('Masih offline — antrean akan dikirim saat internet kembali', true); return; }
+    this.busy = true; this.ui(); let n = 0, stopped = false;
+    try {
+      const { data } = await S.sb.auth.getSession();
+      if (!data || !data.session) { this.needLogin = true; if (manual) toast('Sesi login berakhir. Masuk lagi untuk menyinkronkan (data antrean tetap aman).', true); return; }
+      this.needLogin = false;
+      while (this.q.length) {
+        const op = this.q[0];
+        try { await this.run(op); }
+        catch (e) {
+          if (isNetErr(e)) { stopped = true; break; }
+          console.error('sync gagal', op, e); this.failed.push({ ...op, err: humanErr(e) });
+        }
+        this.q.shift(); n++; await this.save();
+      }
+      if (n) LS.set('bk_last_sync', Date.now());
+    } finally {
+      this.busy = false; this.ui();
+      if (n) toast('☁️ ' + n + ' perubahan tersinkron ke server');
+      if (stopped) this.flushSoon(15000);
+      else if (n && !this.q.length) setTimeout(() => this.refresh(), 800);
+    }
+  },
+  /* ambil data terbaru dari server (perubahan dari perangkat lain) */
+  async refresh(force) {
+    if (S.mode !== 'cloud' || !S.sb || !S.biz || isOffline() || this.q.length || this.busy) return;
+    if (!force && ($('#modal').classList.contains('open') || $('#lock').classList.contains('on') || (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))) return;
+    try {
+      const [d, bl] = await Promise.all([Cloud.load(S.biz.id), Cloud.listBiz()]);
+      if (this.q.length) return;
+      const changed = JSON.stringify(d) !== JSON.stringify(S.d);
+      S.d = d; S.businesses = bl.map(normalizeBiz); const nb = S.businesses.find(b => b.id === S.biz.id); if (nb) { S.biz = nb; APP_TZ = nb.settings.tz || APP_TZ; }
+      await Snap.put(S.biz.id, d); await Snap.put('biz', S.businesses); LS.set('bk_last_sync', Date.now());
+      if (changed && !$('#modal').classList.contains('open')) render();
+      this.ui();
+    } catch (e) { /* abaikan: dicoba lagi nanti */ }
+  },
+  /* sambung ulang setelah mode offline (mis. sinyal kembali tanpa event 'online') */
+  async reconnect() {
+    if (S.mode !== 'cloud' || !S.offline || isOffline()) return;
+    if (!S.sb) { return; }
+    try {
+      const { data } = await S.sb.auth.getSession();
+      if (!data || !data.session) { this.needLogin = true; this.ui(); return; }
+      await Cloud.listBiz(); S.offline = false; this.needLogin = false; this.ui(); toast('✅ Tersambung kembali — menyinkronkan data…');
+      await this.flush(); await this.refresh();
+    } catch (e) { /* masih offline */ }
+  },
+  state() { if (S.mode !== 'cloud') return 'local'; if (isOffline() || S.offline) return 'offline'; if (this.busy) return 'syncing'; if (this.q.length) return 'pending'; return 'ok'; },
+  ui() {
+    const b = $('#syncBtn'); if (!b) return; const st = this.state(), n = this.q.length;
+    const map = { ok: ['cloud', 'Tersinkron', 'ok'], pending: ['clock', n + ' menunggu', 'pend'], syncing: ['refresh', 'Menyinkron…', 'pend'], offline: ['cloudoff', 'Offline' + (n ? ' • ' + n : ''), 'off'], local: ['phone', 'Lokal', 'ok'] };
+    const [icon, label, cls] = map[st];
+    b.className = 'sync-pill ' + cls + (st === 'syncing' ? ' spin' : ''); b.innerHTML = ic(icon) + '<span>' + label + '</span>';
+    b.title = st === 'ok' ? 'Semua data tersimpan di server' : st === 'offline' ? 'Mode offline: perubahan disimpan di perangkat & dikirim otomatis saat online' : 'Ada perubahan yang belum terkirim';
+    const sb = $('.side .sec-badge'); if (sb) sb.outerHTML = secBadge();
+  }
+};
+
+/* lapisan data cloud: tulis lewat antrean, baca dengan cadangan salinan perangkat */
+const CloudSync = {
+  async listBiz() {
+    if (isOffline() || S.offline) { const c = await Snap.get('biz'); if (c) return c; }
+    try { const bl = await Cloud.listBiz(); await Snap.put('biz', bl); return bl; }
+    catch (e) { if (isNetErr(e)) { const c = await Snap.get('biz'); if (c) { S.offline = true; return c; } } throw e; }
+  },
+  async load(bizId) {
+    if (Sync.q.length && !isOffline() && !S.offline) await Sync.flush();
+    if (isOffline() || S.offline || Sync.q.length) { const c = await Snap.get(bizId); if (c) return c; }
+    try { const d = await Cloud.load(bizId); await Snap.put(bizId, d); return d; }
+    catch (e) { if (isNetErr(e)) { const c = await Snap.get(bizId); if (c) { S.offline = true; return c; } } throw e; }
+  },
+  insert(t, rows) { return Sync.exec({ op: 'upsert', t, rows }); },
+  update(t, id, patch) { return Sync.exec({ op: 'update', t, id, patch }); },
+  remove(t, id) { return Sync.exec({ op: 'delete', t, id }); },
+  async clearBiz(bizId) { needOnline(); await Sync.flush(); return Cloud.clearBiz(bizId); },
+  async removeBiz(bizId) { needOnline(); await Sync.flush(); await Cloud.removeBiz(bizId); await IDB.del(Snap.k(bizId)); }
+};
+function needOnline(what) { if (isOffline() || S.offline || !S.sb) throw new Error((what || 'Fitur ini') + ' membutuhkan koneksi internet.'); if (Sync.q.length) throw new Error('Tunggu sampai semua perubahan tersinkron dulu, lalu coba lagi.'); }
+
+/* info sinkronisasi */
+function syncInfo() {
+  const st = Sync.state(), last = LS.get('bk_last_sync', 0), byT = {};
+  Sync.q.forEach(o => { const n = o.op === 'upsert' ? o.rows.length : 1; byT[o.t] = (byT[o.t] || 0) + n; });
+  const TN = { transactions: 'Transaksi', products: 'Produk', stock_moves: 'Riwayat stok', debts: 'Hutang/piutang', contacts: 'Kontak', categories: 'Kategori', accounts: 'Akun', production_logs: 'Catatan harian', budgets: 'Anggaran', businesses: 'Pengaturan usaha' };
+  modal('Sinkronisasi Data', `<div class="alert-item ${st === 'ok' ? 'lv-info' : st === 'offline' ? 'lv-warn' : 'lv-warn'}" style="cursor:default"><div class="ai">${st === 'ok' ? '☁️' : st === 'offline' ? '📴' : '⏳'}</div><div><b>${st === 'ok' ? 'Semua data tersimpan di server' : st === 'offline' ? 'Sedang offline' : 'Ada perubahan menunggu dikirim'}</b><small>${st === 'offline' ? 'Tetap catat seperti biasa. Perubahan disimpan aman di perangkat ini dan otomatis dikirim saat internet kembali.' : st === 'ok' ? 'Aplikasi juga menyimpan salinan di perangkat ini, jadi tetap bisa dibuka & dipakai saat offline.' : 'Perubahan akan dikirim otomatis. Anda juga bisa menekan Sinkronkan sekarang.'}</small></div></div>
+    ${Sync.q.length ? `<h4 style="margin:12px 0 6px">Antrean (${Sync.q.length})</h4>${Object.entries(byT).map(([t, n]) => `<div class="row between small" style="padding:4px 0"><span>${TN[t] || t}</span><b>${n}</b></div>`).join('')}` : ''}
+    ${Sync.failed.length ? `<h4 style="margin:12px 0 6px;color:var(--out)">Gagal disimpan server (${Sync.failed.length})</h4>${Sync.failed.slice(-5).map(f => `<div class="xs muted">${TN[f.t] || f.t}: ${esc(f.err)}</div>`).join('')}<button class="btn sm mt" onclick="Sync.failed=[];Sync.save();closeModal();toast('Daftar dibersihkan')">Bersihkan daftar</button>` : ''}
+    ${Sync.needLogin ? `<div class="alert-item lv-danger" style="cursor:default"><div class="ai">🔑</div><div><b>Perlu masuk lagi</b><small>Sesi login sudah berakhir. Masuk lagi untuk mengirim antrean — data di perangkat tetap aman.</small><div><button class="btn sm primary mt" onclick="closeModal();showAuth('login')">Masuk</button></div></div></div>` : ''}
+    ${S.mode === 'cloud' && !S.sb ? '<p class="xs muted">Muat ulang aplikasi saat online untuk mulai menyinkronkan.</p>' : ''}
+    <p class="xs muted">Sinkron terakhir: ${last ? new Date(last).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</p>`,
+    { foot: `<button class="btn" onclick="closeModal()">Tutup</button><button class="btn primary" onclick="closeModal();Sync.flush(true).then(()=>Sync.refresh(true))">${ic('refresh')} Sinkronkan sekarang</button>` });
+}
+
+window.addEventListener('online', () => { S.offline = false; Sync.ui(); toast('✅ Kembali online — menyinkronkan data…'); Sync.flush().then(() => Sync.refresh()); });
+window.addEventListener('offline', () => { Sync.ui(); if (S.mode === 'cloud') toast('📴 Offline — tetap bisa mencatat, data akan dikirim saat online'); else toast('📴 Offline'); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.mode === 'cloud') { if (S.offline) Sync.reconnect(); else { Sync.flush(); Sync.refresh(); } } });
+setInterval(() => { if (document.hidden || S.mode !== 'cloud') return; if (S.offline) Sync.reconnect(); else if (Sync.q.length) Sync.flush(); else Sync.refresh(); }, 60000);
 
 /* jalankan */
 boot();

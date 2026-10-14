@@ -129,7 +129,11 @@ body.privacy .chart-box canvas{filter:blur(10px)}
 .main{min-width:0;display:flex;flex-direction:column}
 .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;padding:14px 28px;border:0;border-bottom:1px solid transparent;transition:background .2s}
 .topbar.scrolled{border-width:0 0 1px 0}
-.topbar.is-offline:after{content:'Offline';position:absolute;right:50%;top:6px;transform:translateX(50%);background:var(--c-out);color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:99px}
+.sync-pill{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:999px;border:1px solid var(--glass-border);background:var(--neu);box-shadow:3px 3px 8px var(--neu-lo),-3px -3px 8px var(--neu-hi);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex:none}
+.sync-pill svg.i{width:17px;height:17px}
+.sync-pill.ok{color:var(--in)}.sync-pill.pend{color:var(--warn)}.sync-pill.off{color:#fff;background:var(--c-out);border-color:transparent;box-shadow:0 6px 14px color-mix(in srgb,var(--c-out) 35%,transparent)}
+.sync-pill.spin svg{animation:spin 1s linear infinite}
+@media (max-width:640px){.sync-pill.ok span{display:none}.sync-pill{padding:0 10px}}
 .topbar h2{margin:0;font-size:20px;letter-spacing:-.02em}
 .topbar .sub{font-size:12px;color:var(--muted)}
 .content{padding:8px 28px 40px;max-width:1320px;width:100%}

@@ -11,12 +11,18 @@ async function boot() {
   const mode = LS.get('bk_mode', null), cfg = getCfg();
   if (mode === 'local') { S.mode = 'local'; return afterAuth(); }
   if (cfg.url && cfg.key) {
+    if (!window.supabase && LS.get('bk_last_user', null)) { S.mode = 'cloud'; S.offline = true; S.user = LS.get('bk_last_user'); return afterAuth(); }
     if (!window.supabase) { screen(`<div class="auth-card">${brandHTML()}<p>Tidak bisa memuat pustaka Supabase. Periksa koneksi internet lalu muat ulang.</p><button class="btn primary block" onclick="location.reload()">Muat ulang</button><button class="btn block mt" onclick="useLocal()">Pakai Mode Lokal</button></div>`); return; }
     try { S.sb = supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, global: { fetch: fetchRetry } }); } catch (e) { LS.del('bk_cfg'); return showSetup('URL/kunci Supabase tidak valid.'); }
     S.mode = 'cloud';
     S.sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => changePass(true), 400); });
-    const { data } = await S.sb.auth.getSession();
-    if (data && data.session) { S.user = data.session.user; return afterAuth(); }
+    let session = null, serr = null;
+    try { const r = await S.sb.auth.getSession(); session = r.data && r.data.session; serr = r.error; } catch (e) { serr = e; }
+    if (session) { S.user = session.user; return afterAuth(); }
+    /* offline / sinyal putus: buka dengan data tersimpan di perangkat */
+    const lu = LS.get('bk_last_user', null);
+    if (lu && (isOffline() || (serr && isNetErr(serr)))) { S.user = lu; S.offline = true; return afterAuth(); }
+    if (isOffline()) { screen(`<div class="auth-card">${brandHTML()}<p><b>Anda sedang offline.</b><br><span class="muted small">Masuk pertama kali membutuhkan internet. Setelah itu aplikasi bisa dipakai offline.</span></p><button class="btn primary block" onclick="location.reload()">Coba lagi</button></div>`); return; }
     return showAuth();
   }
   showSetup();
@@ -90,17 +96,21 @@ function changePass(recovery) {
       if (error) return toast(error.message, true); closeModal(); toast('Kata sandi berhasil diperbarui 🔐'); } });
 }
 async function logout(all) {
-  confirmBox(all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?', async () => {
+  const pend = S.mode === 'cloud' ? Sync.q.length : 0;
+  if (pend && !isOffline()) { await Sync.flush(); }
+  const left = S.mode === 'cloud' ? Sync.q.length : 0;
+  confirmBox((all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?') + (left ? `<div class="alert-item lv-danger mt" style="cursor:default"><div class="ai">⚠️</div><div><b>${left} perubahan belum tersinkron</b><small>Jika keluar sekarang, perubahan offline itu akan hilang. Sebaiknya sambungkan internet dulu.</small></div></div>` : ''), async () => {
     LS.del('bk_pin');
-    if (S.mode === 'cloud') await S.sb.auth.signOut(all ? { scope: 'global' } : undefined); else LS.del('bk_mode');
+    if (S.mode === 'cloud') { const uid = S.user && S.user.id; LS.del('bk_last_user'); if (uid) await IDB.clearUser(uid); try { if (S.sb) await S.sb.auth.signOut(all ? { scope: 'global' } : undefined); } catch (e) {} } else LS.del('bk_mode');
     location.reload();
   }, 'Keluar');
 }
 
 async function afterAuth() {
   screen('<div class="loader"></div>');
+  if (S.mode === 'cloud' && S.user) { LS.set('bk_last_user', { id: S.user.id, email: S.user.email }); await Sync.init(S.user.id); }
   try { S.businesses = (await B().listBiz()).map(normalizeBiz); }
-  catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><p class="small muted">Pastikan file <b>schema.sql</b> sudah dijalankan di Supabase SQL Editor.</p><button class="btn primary block" onclick="location.reload()">Coba lagi</button><button class="btn block mt" onclick="S.sb.auth.signOut().then(()=>location.reload())">Keluar</button></div>`); return; }
+  catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><p class="small muted">${isNetErr(e) ? 'Data usaha belum pernah tersimpan di perangkat ini. Buka sekali saat online agar bisa dipakai offline.' : 'Pastikan file <b>schema.sql</b> sudah dijalankan di Supabase SQL Editor.'}</p><button class="btn primary block" onclick="location.reload()">Coba lagi</button><button class="btn block mt" onclick="S.sb.auth.signOut().then(()=>location.reload())">Keluar</button></div>`); return; }
   if (!S.businesses.length) return showWizard();
   const last = LS.get('bk_biz'); await openBiz(S.businesses.find(b => b.id === last) || S.businesses[0]);
 }
@@ -109,6 +119,7 @@ async function openBiz(b) {
   try { S.d = await B().load(b.id); } catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data usaha.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><button class="btn primary block" onclick="openBiz(S.businesses.find(x=>x.id==='${b.id}')||S.biz)">Coba lagi</button></div>`); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
   shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
+  if (S.mode === 'cloud') { Sync.ui(); if (S.offline) toast('📴 Mode offline — data dari perangkat ini. Perubahan dikirim otomatis saat online.'); else setTimeout(() => Sync.flush(), 1200); }
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
 }
 
@@ -202,6 +213,7 @@ function shell() {
       <button class="icon-btn mob-only" onclick="openSide()" aria-label="Menu">${ic('menu')}</button>
       <div class="grow"><h2 id="pgTitle"></h2><div class="sub" id="pgSub"></div></div>
       <div id="topExtra" class="row desk-only"></div>
+      ${S.mode === 'cloud' ? '<button class="sync-pill" id="syncBtn" onclick="syncInfo()" aria-label="Status sinkronisasi"></button>' : ''}
       <button class="icon-btn ${LS.get('bk_privacy', false) ? 'on' : ''}" id="privBtn" onclick="togglePrivacy()" title="Sembunyikan / tampilkan nominal" aria-label="Sembunyikan nominal">${ic(LS.get('bk_privacy', false) ? 'eyeoff' : 'eye')}</button>
       <button class="icon-btn" onclick="openAlerts()" aria-label="Notifikasi">${ic('bell')}<span class="badge hidden" id="bellBadge"></span></button>
       <button class="btn primary desk-only" onclick="quickAdd()">${ic('plus')} Catat</button>
@@ -228,10 +240,10 @@ function render() {
   $('#topExtra').innerHTML = '';
   $('#content').innerHTML = pg.html();
   pg.mount && pg.mount();
-  updateBell(); cacheBizSummary();
+  updateBell(); cacheBizSummary(); Sync.ui();
 }
 function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam') + ' 👋 ' + fmtDay(today()); }
-let _dc; function dataChanged() { clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
+let _dc; function dataChanged() { Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
   modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
@@ -304,7 +316,7 @@ async function showSysNotif(title, body, page, tag) {
 const serverPush = () => S.mode === 'cloud' && LS.get('bk_server_push', false);
 const b64u = s => { const r = atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, c => c.charCodeAt(0)); };
 async function subscribePush(silent) {
-  if (S.mode !== 'cloud' || !CONFIG.VAPID_PUBLIC_KEY || !('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  if (S.mode !== 'cloud' || isOffline() || S.offline || !S.sb || !CONFIG.VAPID_PUBLIC_KEY || !('serviceWorker' in navigator) || !('PushManager' in window)) return false;
   try {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();

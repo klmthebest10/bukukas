@@ -73,3 +73,9 @@ Setelah update, naikkan `VERSION` di `sw.js` (misal `bukukas-v1.0.1`) agar peran
 - File `003_secrets_cron.sql` (berisi kunci rahasia, TIDAK disertakan di repo) — menyimpan kunci VAPID ke Vault & membuat jadwal cron.
 
 Aplikasi khusus Indonesia: semua nominal dalam **Rupiah**, zona waktu per usaha bisa dipilih **WIB / WITA / WIT** (dipakai untuk tanggal transaksi & jam pengingat). Database: project Supabase **bukukas** di region **Singapura (ap-southeast-1)**, region Supabase terdekat dari Indonesia. Aplikasi online di https://warungindonesia.my.id/
+
+## Online + Offline (akun cloud)
+- Data usaha disimpan juga di perangkat (IndexedDB). Aplikasi tetap terbuka & bisa dipakai tanpa internet.
+- Perubahan saat offline masuk antrean (`src/7-sync.js`) dan dikirim otomatis saat online, berurutan & tanpa dobel (upsert by id).
+- Indikator di atas layar: ☁️ Tersinkron • ⏳ menunggu • 📴 Offline. Ketuk untuk detail & "Sinkronkan sekarang".
+- Fitur yang butuh internet: daftar/masuk pertama kali, pulihkan backup, kosongkan data, hapus usaha, notifikasi uji.
