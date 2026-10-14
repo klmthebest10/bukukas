@@ -16,14 +16,7 @@ create table if not exists public.push_subscriptions (
   unique (user_id, endpoint)
 );
 alter table public.push_subscriptions enable row level security;
-drop policy if exists "own_select" on public.push_subscriptions;
-drop policy if exists "own_insert" on public.push_subscriptions;
-drop policy if exists "own_update" on public.push_subscriptions;
-drop policy if exists "own_delete" on public.push_subscriptions;
-create policy "own_select" on public.push_subscriptions for select using (auth.uid() = user_id);
-create policy "own_insert" on public.push_subscriptions for insert with check (auth.uid() = user_id);
-create policy "own_update" on public.push_subscriptions for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "own_delete" on public.push_subscriptions for delete using (auth.uid() = user_id);
+create policy "own_all" on public.push_subscriptions for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Catatan notifikasi yang sudah terkirim (agar tidak dobel). Hanya server yang mengakses.
 create table if not exists public.push_log (
@@ -46,7 +39,7 @@ as $$
   from vault.decrypted_secrets
   where name like 'bukukas_%';
 $$;
-revoke all on function public.get_push_config() from public, anon, authenticated;
+revoke execute on function public.get_push_config() from public, anon, authenticated;
 grant execute on function public.get_push_config() to service_role;
 
 create extension if not exists pg_cron;

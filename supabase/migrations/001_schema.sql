@@ -5,7 +5,6 @@
 --  Setiap pengguna hanya bisa melihat & mengubah datanya sendiri (Row Level Security).
 -- =====================================================================
 
-create extension if not exists "pgcrypto";
 
 -- ---------- USAHA ----------
 create table if not exists public.businesses (
@@ -155,20 +154,23 @@ create index if not exists idx_debts_biz on public.debts(business_id);
 create index if not exists idx_prod_biz on public.products(business_id);
 
 -- ---------- ROW LEVEL SECURITY ----------
-do $$
-declare t text;
-begin
-  foreach t in array array['businesses','accounts','categories','contacts','products',
-                           'stock_moves','debts','transactions','production_logs','budgets']
-  loop
-    execute format('alter table public.%I enable row level security', t);
-    execute format('drop policy if exists "own_select" on public.%I', t);
-    execute format('drop policy if exists "own_insert" on public.%I', t);
-    execute format('drop policy if exists "own_update" on public.%I', t);
-    execute format('drop policy if exists "own_delete" on public.%I', t);
-    execute format('create policy "own_select" on public.%I for select using (auth.uid() = user_id)', t);
-    execute format('create policy "own_insert" on public.%I for insert with check (auth.uid() = user_id)', t);
-    execute format('create policy "own_update" on public.%I for update using (auth.uid() = user_id) with check (auth.uid() = user_id)', t);
-    execute format('create policy "own_delete" on public.%I for delete using (auth.uid() = user_id)', t);
-  end loop;
-end $$;
+alter table public.businesses enable row level security;
+alter table public.accounts enable row level security;
+alter table public.categories enable row level security;
+alter table public.contacts enable row level security;
+alter table public.products enable row level security;
+alter table public.stock_moves enable row level security;
+alter table public.debts enable row level security;
+alter table public.transactions enable row level security;
+alter table public.production_logs enable row level security;
+alter table public.budgets enable row level security;
+create policy "own_all" on public.businesses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.accounts for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.categories for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.contacts for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.products for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.stock_moves for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.debts for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.transactions for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.production_logs for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_all" on public.budgets for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
