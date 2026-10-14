@@ -209,7 +209,7 @@ function shell() {
   const third = m.kasir ? { id: 'kasir', label: 'Kasir', icon: 'cart' } : { id: 'laporan', label: 'Laporan', icon: 'chart' };
   $('#app').innerHTML = `
   <aside class="side">
-    <button class="biz-switch" onclick="bizMenu()"><span class="e">${esc(st.emoji || T.emoji)}</span><span class="grow"><b class="ell">${esc(S.biz.name)}</b><small class="ell">${esc(bizTypeLabel(S.biz))}</small></span>${ic('chev')}</button>
+    <button class="biz-switch" onclick="bizMenu()"><span class="e">${iconH(st.emoji, T.emoji)}</span><span class="grow"><b class="ell">${esc(S.biz.name)}</b><small class="ell">${esc(bizTypeLabel(S.biz))}</small></span>${ic('chev')}</button>
     <nav class="nav">${items.map(n => `${n.id === 'laporan' || n.id === 'usaha' ? '<div class="sep"></div>' : ''}<button type="button" data-nav="${n.id}" onclick="go('${n.id}')">${ic(n.icon)}<span>${n.label}</span></button>`).join('')}</nav>
     <div class="side-foot">
       ${secBadge()}
@@ -238,7 +238,7 @@ function shell() {
   </nav>`;
 }
 const PAGES = {};
-function go(p) { if (!navAllowed(p)) p = 'dashboard'; S.page = p; closeOverlays(); closeModal(); render(); window.scrollTo({ top: 0 }); try { history.replaceState(null, '', location.pathname + (p !== 'dashboard' ? '?page=' + p : '')); } catch (e) {} }
+function go(p) { if (!navAllowed(p)) p = 'dashboard'; if (p === 'pengaturan' && !S._keepSec) S.setSec = null; S._keepSec = false; S.page = p; closeOverlays(); closeModal(); render(); window.scrollTo({ top: 0 }); try { history.replaceState(null, '', location.pathname + (p !== 'dashboard' ? '?page=' + p : '')); } catch (e) {} }
 function render() {
   if (!S.biz || !$('#content')) return;
   invalidateStock();
@@ -256,7 +256,7 @@ function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 
 let _dc; function dataChanged() { invalidateStock(); Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
-  modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
+  modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${iconH(b.settings && b.settings.emoji, T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
   <button class="btn primary block mt" onclick="closeModal();closeOverlays();WZ.type='warung';showWizard(true)">${ic('plus')} Tambah Usaha Baru</button>
   <button class="btn block mt" onclick="closeModal();go('usaha')">${ic('store')} Kelola Semua Usaha & Buku</button>
   <p class="muted xs" style="margin-bottom:0">Setiap usaha punya pembukuan, kategori, stok & laporan sendiri.</p>`);
@@ -301,7 +301,7 @@ function openAlerts() {
   const A = computeAlerts(); const ns = notifSet();
   LS.set('bk_read', A.map(a => a.id)); updateBell();
   const dr = $('#drawer');
-  dr.innerHTML = `<div class="sheet-h"><h3>Notifikasi</h3><div class="row"><button class="btn sm" onclick="closeOverlays();go('pengaturan');setTimeout(()=>{const x=document.getElementById('set-notif');x&&x.scrollIntoView({behavior:'smooth'})},100)">${ic('gear')} Atur</button><button class="icon-btn" onclick="closeOverlays()">${ic('x')}</button></div></div>
+  dr.innerHTML = `<div class="sheet-h"><h3>Notifikasi</h3><div class="row"><button class="btn sm" onclick="closeOverlays();openSet('notif')">${ic('gear')} Atur</button><button class="icon-btn" onclick="closeOverlays()">${ic('x')}</button></div></div>
   <div class="sheet-b" style="flex:1">${A.length ? A.map(alertHTML).join('') : `<div class="empty"><div class="e">🔔</div><b>Semua aman</b><p class="small">Tidak ada pemberitahuan saat ini.</p></div>`}
   ${!ns.push ? `<div class="card mt" style="background:var(--surface-2)"><b class="small">Ingin notifikasi muncul di HP/PC?</b><p class="xs muted" style="margin:4px 0 10px">Aktifkan notifikasi perangkat agar pengingat muncul seperti aplikasi biasa.</p><button class="btn sm primary" onclick="enablePush()">Aktifkan</button></div>` : ''}</div>`;
   dr.classList.add('on'); $('#scrim').classList.add('on');

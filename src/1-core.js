@@ -324,6 +324,46 @@ function txTitle(t) {
   return c ? c.name : (t.type === 'in' ? 'Pemasukan' : 'Pengeluaran');
 }
 function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'adjust') return '⚖️'; if (t.ref === 'debt') return '🤝'; const c = cat(t.category_id); return (c && c.icon) || (t.type === 'in' ? '💰' : '🧾'); }
+/* ikon: emoji ATAU gambar kecil (data URL hasil kompres dari perangkat) */
+const isImgIcon = v => typeof v === 'string' && /^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(v);
+const iconH = (v, fb = '🏷️') => isImgIcon(v) ? `<img class="ico-img" src="${v}" alt="">` : esc(v || fb);
+const accIcon = a => a && a.icon ? a.icon : a && a.type === 'bank' ? '🏦' : a && a.type === 'ewallet' ? '📱' : '💵';
+function compressIcon(file, size = 128) {
+  return new Promise((res, rej) => {
+    if (!file || !/^image\//.test(file.type || 'image/')) return rej(new Error('File harus berupa gambar'));
+    if (file.size > 25 * 1024 * 1024) return rej(new Error('Gambar terlalu besar (maks 25 MB)'));
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas'); c.width = c.height = size; const x = c.getContext('2d');
+        const s = Math.min(img.naturalWidth, img.naturalHeight), sx = (img.naturalWidth - s) / 2, sy = (img.naturalHeight - s) / 2;
+        x.imageSmoothingQuality = 'high'; x.drawImage(img, sx, sy, s, s, 0, 0, size, size);
+        let out = c.toDataURL('image/webp', 0.82);
+        if (!out.startsWith('data:image/webp')) { const png = c.toDataURL('image/png'); out = png.length < 24000 ? png : c.toDataURL('image/jpeg', 0.85); }
+        for (let q = 0.7; out.length > 24000 && q > 0.3; q -= 0.15) out = c.toDataURL(out.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg', q);
+        res(out);
+      } catch (e) { rej(e); } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Gambar tidak bisa dibaca (coba format JPG/PNG)')); };
+    img.src = url;
+  });
+}
+/* kolom ikon di formulir: emoji atau unggah gambar (otomatis dikompres) */
+function iconField(name, value, fb = '🏷️') {
+  const img = isImgIcon(value);
+  return `<div class="ico-field" data-fb="${esc(fb)}"><div class="ico-prev">${iconH(value, fb)}</div><input type="hidden" name="${name}" value="${esc(value || '')}">
+    <div class="grow" style="min-width:0"><input class="inp ico-emoji" maxlength="4" placeholder="Emoji ${esc(fb)}" value="${img ? '' : esc(value || '')}" oninput="icoEmoji(this)">
+    <div class="row gap-s wrap" style="margin-top:8px"><label class="btn sm">${ic('upload')} Unggah gambar<input type="file" accept="image/*" hidden onchange="icoUpload(this)"></label><button type="button" class="btn sm ghost ico-clear" ${img ? '' : 'hidden'} onclick="icoClear(this)">${ic('x')} Hapus gambar</button></div></div></div>`;
+}
+const icoBox = el => el.closest('.ico-field');
+function icoSet(box, v) { box.querySelector('input[type=hidden]').value = v; box.querySelector('.ico-prev').innerHTML = iconH(v, box.dataset.fb); box.querySelector('.ico-clear').hidden = !isImgIcon(v); }
+function icoEmoji(inp) { icoSet(icoBox(inp), inp.value.trim()); }
+async function icoUpload(inp) {
+  const f = inp.files && inp.files[0], box = icoBox(inp); inp.value = ''; if (!f) return;
+  try { const d = await compressIcon(f); icoSet(box, d); box.querySelector('.ico-emoji').value = ''; toast('Gambar ikon siap (' + Math.max(1, Math.round(d.length * 0.75 / 1024)) + ' KB)'); }
+  catch (e) { toast(e.message || 'Gagal memproses gambar', true); }
+}
+function icoClear(btn) { const box = icoBox(btn); box.querySelector('.ico-emoji').value = ''; icoSet(box, ''); }
 function catSpend(catId, from, to) { return sum(S.d.transactions.filter(t => t.category_id === catId && t.type === 'out' && inR(t.date, from, to)), t => t.amount); }
 function monthRange(offset = 0) { const d = new Date(today() + 'T00:00:00'); const a = new Date(d.getFullYear(), d.getMonth() + offset, 1), b = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0); return { from: dstr(a), to: dstr(b) }; }
 function metricAgg(m, logs) {

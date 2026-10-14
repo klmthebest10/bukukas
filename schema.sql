@@ -28,6 +28,7 @@ create table if not exists public.accounts (
   type text not null default 'kas',
   opening_balance numeric not null default 0,
   color text,
+  icon text, -- emoji atau gambar kecil (data URL)
   created_at timestamptz not null default now()
 );
 

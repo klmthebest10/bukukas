@@ -80,3 +80,6 @@ Aplikasi khusus Indonesia: semua nominal dalam **Rupiah**, zona waktu per usaha 
 - Indikator di atas layar: ☁️ Tersinkron • ⏳ menunggu • 📴 Offline. Ketuk untuk detail & "Sinkronkan sekarang".
 - Fitur yang butuh internet: daftar/masuk pertama kali, pulihkan backup, kosongkan data, hapus usaha, notifikasi uji.
 - **Stok anti-tertimpa**: stok produk = `stock_base` + jumlah semua `stock_moves.qty` (migrasi `004_stock_base.sql`). Penjualan/stok masuk dari beberapa HP — termasuk yang offline — hanya menambah baris riwayat, jadi semuanya terhitung saat sinkron. Saran: lakukan **stok opname** dari satu perangkat saja dan saat semua perangkat sudah tersinkron.
+- **Pengaturan per bagian** (v1.7): menu Usaha • Keuangan • Data & Pilihan • Aplikasi. Di HP tampil daftar menu → ketuk untuk membuka bagiannya; di PC menu di kiri, isi di kanan.
+- **Ubah saldo** akun hanya lewat Pengaturan → Akun & Saldo (dicatat sebagai transaksi penyesuaian).
+- **Ikon dari perangkat**: kategori, akun, dan logo usaha bisa memakai emoji atau gambar yang diunggah; gambar otomatis dipotong persegi & dikompres (±1–20 KB, 128×128) lalu disimpan di database (migrasi `005_account_icon.sql`).

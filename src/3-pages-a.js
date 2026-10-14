@@ -50,7 +50,7 @@ function customRange(cb) {
 function txRow(t) {
   const c = cat(t.category_id), col = (c && c.color) || (t.type === 'in' ? '#059669' : t.type === 'out' ? '#dc2626' : '#4f46e5');
   const sub = [t.type === 'transfer' ? ((acc(t.account_id) || {}).name || '?') + ' → ' + ((acc(t.to_account_id) || {}).name || '?') : (acc(t.account_id) || {}).name, t.contact_id ? contactName(t.contact_id) : '', t.ref === 'sale' && t.items ? t.items.length + ' item' : '', t.note].filter(Boolean).map(esc).join(' • ');
-  return `<div class="li" onclick="txForm('${t.id}')"><div class="av" style="background:${col}1f">${txIcon(t)}</div><div class="grow"><div class="t ell">${esc(txTitle(t))}</div><div class="s ell">${sub || '&nbsp;'}</div></div><div class="amt num ${t.type === 'in' ? 'c-in' : t.type === 'out' ? 'c-out' : ''}">${t.type === 'in' ? '+' : t.type === 'out' ? '−' : ''}${money(t.amount)}</div></div>`;
+  return `<div class="li" onclick="txForm('${t.id}')"><div class="av" style="background:${col}1f">${iconH(txIcon(t))}</div><div class="grow"><div class="t ell">${esc(txTitle(t))}</div><div class="s ell">${sub || '&nbsp;'}</div></div><div class="amt num ${t.type === 'in' ? 'c-in' : t.type === 'out' ? 'c-out' : ''}">${t.type === 'in' ? '+' : t.type === 'out' ? '−' : ''}${money(t.amount)}</div></div>`;
 }
 const sortTx = (a, b) => a.date === b.date ? String(b.created_at || '').localeCompare(String(a.created_at || '')) : (a.date < b.date ? 1 : -1);
 
@@ -67,9 +67,9 @@ PAGES.dashboard = {
     <div class="mb">${periodChips(S.period, 'setPeriod')}</div>
     <div class="grid g-dash mb">
       <div class="hero">
-        <div class="lbl" style="justify-content:space-between">Total Saldo Usaha<button type="button" onclick="balanceAll()" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;padding:4px 10px;font-weight:700;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px">${ic('edit')} Ubah saldo</button></div>
+        <div class="lbl">Total Saldo Usaha</div>
         <div class="val num">${money(bal)}</div>
-        <div class="acc-chips">${S.d.accounts.map(a => `<div class="acc-chip" role="button" tabindex="0" style="cursor:pointer" title="Ubah saldo ${esc(a.name)}" onclick="balanceForm('${a.id}')"><small>${esc(a.name)} ✎</small><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div>
+        <div class="acc-chips">${S.d.accounts.map(a => `<div class="acc-chip"><small>${esc(a.name)}</small><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div>
         <div class="hero-actions">
           <button onclick="txForm(null,'in')">${ic('up')}Pemasukan</button>
           <button onclick="txForm(null,'out')">${ic('down')}Pengeluaran</button>
@@ -225,7 +225,7 @@ function txForm(id, type = 'in', preset = {}) {
   modal(title, body, { foot: `${t ? `<button class="btn danger" onclick="deleteTx('${t.id}')">${ic('trash')}Hapus</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="txSave">${ic('check')}Simpan</button>`,
     onMount: m => { m.querySelector('#txSave').onclick = () => saveTx(id, type); m.querySelector('#txf').onsubmit = e => { e.preventDefault(); saveTx(id, type); }; } });
 }
-const catOpt = (c, sel) => `<div class="cat-opt ${sel === c.id ? 'on' : ''}" data-id="${c.id}" onclick="pickCat(this)"><span class="e">${esc(c.icon || '🏷️')}</span><span class="ell" style="display:block">${esc(c.name)}</span></div>`;
+const catOpt = (c, sel) => `<div class="cat-opt ${sel === c.id ? 'on' : ''}" data-id="${c.id}" onclick="pickCat(this)"><span class="e">${iconH(c.icon, '🏷️')}</span><span class="ell" style="display:block">${esc(c.name)}</span></div>`;
 function pickCat(el) { $$('#catGrid .cat-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#txf [name=category_id]').value = el.dataset.id; }
 function quickCat(type) {
   const g = $('#catGrid'); if (!g || $('#qcBox')) return $('#qcBox input') && $('#qcBox input').focus();
@@ -352,7 +352,7 @@ function checkoutForm() {
     <div class="row between small"><span class="muted">Potongan</span><b class="num c-out" id="coDiscAmt">-</b></div>
     <div class="total-line" style="font-size:24px"><span>Total</span><span class="num c-in" id="coTotal"></span></div>
     <label class="f"><span>Metode pembayaran</span></label><input type="hidden" name="method" value="${first.id}">
-    <div class="pay-opts">${S.d.accounts.map(a => `<div class="pay-opt ${a.id === first.id ? 'on' : ''}" role="button" tabindex="0" data-v="${a.id}" data-kas="${a.type === 'kas' ? 1 : 0}" onclick="coPay(this)">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'} ${esc(a.name)}</div>`).join('')}${m.hutang ? `<div class="pay-opt" role="button" tabindex="0" data-v="credit" onclick="coPay(this)">📝 Bayar Nanti</div>` : ''}</div>
+    <div class="pay-opts">${S.d.accounts.map(a => `<div class="pay-opt ${a.id === first.id ? 'on' : ''}" role="button" tabindex="0" data-v="${a.id}" data-kas="${a.type === 'kas' ? 1 : 0}" onclick="coPay(this)">${iconH(accIcon(a))} ${esc(a.name)}</div>`).join('')}${m.hutang ? `<div class="pay-opt" role="button" tabindex="0" data-v="credit" onclick="coPay(this)">📝 Bayar Nanti</div>` : ''}</div>
     <div id="coCash" class="${first.type === 'kas' ? '' : 'hidden'}"><label class="f"><span>Uang diterima</span>${moneyInput('cash', '', 'aria-label="Uang diterima"', 'coCalc()')}</label><div class="quick-cash" id="qcash"></div><div class="row between mb"><span class="muted">Kembalian</span><b class="num" id="coChange" style="font-size:18px">-</b></div></div>
     <div class="f-row"><label class="f"><span>Pelanggan</span><select class="inp" name="contact_id"><option value="">— Umum —</option>${S.d.contacts.filter(c => c.type !== 'supplier').map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
       <label class="f"><span>atau nama baru</span><input class="inp" name="new_contact" placeholder="Nama pelanggan"></label></div>
