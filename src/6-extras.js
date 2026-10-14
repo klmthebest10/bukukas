@@ -36,6 +36,37 @@ function listDel(k, i) {
     await safe(async () => { if (k === 'groups') for (const p of S.d.products.filter(p => p.group_name === v)) await upd('products', p.id, { group_name: null }); await listSave(k, l.filter((_, j) => j !== i)); }, 'Dihapus');
     render(); });
 }
+/* Dropdown pilihan dari daftar + "Tambah baru" (langsung masuk ke daftar & tersimpan, juga saat offline) */
+function listPick(name, k, value, opt = {}) {
+  value = value == null ? '' : String(value);
+  const items = listItems(k), all = value && !items.includes(value) ? [...items, value] : items, id = 'lp_' + name;
+  return `<div class="lpick" id="${id}"><select class="inp" name="${esc(name)}" data-k="${k}" data-prev="${esc(value)}" onchange="lpChange(this)">
+    ${opt.empty ? `<option value="" ${!value ? 'selected' : ''}>${esc(opt.empty)}</option>` : ''}
+    ${all.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+    <option value="__new">➕ Tambah ${esc(LIST_META[k][2])} baru…</option></select>
+    <div class="lp-new" hidden><input class="inp" maxlength="40" placeholder="Nama ${esc(LIST_META[k][2])} baru" onkeydown="if(event.key==='Enter'){event.preventDefault();lpAdd('${id}')}else if(event.key==='Escape'){event.preventDefault();lpCancel('${id}')}">
+    <button type="button" class="btn primary sm" onclick="lpAdd('${id}')">Tambah</button><button type="button" class="icon-btn" title="Batal" aria-label="Batal" onclick="lpCancel('${id}')">${ic('x')}</button></div></div>`;
+}
+function lpChange(sel) {
+  if (sel.value !== '__new') { sel.dataset.prev = sel.value; return; }
+  const box = sel.parentElement, nw = box.querySelector('.lp-new');
+  sel.value = sel.dataset.prev; nw.hidden = false; const i = nw.querySelector('input'); i.value = ''; setTimeout(() => i.focus(), 30);
+}
+function lpCancel(id) { const box = document.getElementById(id); if (box) box.querySelector('.lp-new').hidden = true; }
+async function lpAdd(id) {
+  const box = document.getElementById(id); if (!box) return;
+  const sel = box.querySelector('select'), inp = box.querySelector('.lp-new input'), k = sel.dataset.k, v = inp.value.trim().replace(/\s+/g, ' ');
+  if (!v) { toast('Isi nama ' + LIST_META[k][2] + ' baru', true); return inp.focus(); }
+  const l = listItems(k), hit = l.find(x => x.toLowerCase() === v.toLowerCase());
+  const pick = val => {
+    let o = [...sel.options].find(o => o.value === val);
+    if (!o) { o = new Option(val, val); sel.insertBefore(o, sel.querySelector('option[value="__new"]')); }
+    sel.value = val; sel.dataset.prev = val; box.querySelector('.lp-new').hidden = true;
+  };
+  if (hit) { pick(hit); return toast('"' + hit + '" sudah ada di daftar — dipilih'); }
+  const ok = await safe(async () => { await listSave(k, [...l, v]); return true; }, '"' + v + '" ditambahkan ke daftar ' + LIST_META[k][2]);
+  if (ok) pick(v);
+}
 async function listReset(k) { confirmBox('Kembalikan daftar ' + LIST_META[k][0].toLowerCase() + ' ke bawaan?', async () => { await safe(() => listSave(k, [...DEFAULT_LISTS[k]]), 'Daftar dikembalikan'); render(); }, 'Kembalikan'); }
 
 /* ---------------- KUNCI PIN ---------------- */

@@ -1196,11 +1196,10 @@ function productMenu(id) {
 }
 function productForm(id) {
   const p = id ? prod(id) : { name: '', unit: 'pcs', buy_price: '', sell_price: '', stock: '', min_stock: '', track_stock: true, active: true, group_name: '', sku: '' };
-  const groups = [...new Set(S.d.products.map(x => x.group_name).filter(Boolean))];
   modal(id ? 'Edit Produk' : 'Produk Baru', `<form id="pf">
     <label class="f"><span>Nama produk / jasa</span><input class="inp" name="name" value="${esc(p.name)}" required autofocus></label>
-    <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${[...new Set([...listGet('groups'), ...groups])].map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
-      <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${listGet('units').map(u => `<option value="${esc(u)}">`).join('')}</datalist></label></div>
+    <div class="f-row"><div class="f"><span>Kelompok</span>${listPick('group_name', 'groups', p.group_name || '', { empty: 'Tanpa kelompok' })}</div>
+      <div class="f"><span>Satuan</span>${listPick('unit', 'units', p.unit || 'pcs')}</div></div>
     <div class="f-row"><label class="f"><span>Harga beli / modal</span>${moneyInput('buy_price', p.buy_price)}</label><label class="f"><span>Harga jual</span>${moneyInput('sell_price', p.sell_price)}</label></div>
     <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${id ? stockOf(p) : ''}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
     <label class="f"><span>Kode / SKU (opsional)</span><input class="inp" name="sku" value="${esc(p.sku || '')}"></label>
@@ -1257,7 +1256,7 @@ function opname(pid) {
   const p = prod(pid);
   modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(stockOf(p), 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
     <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${stockOf(p)}" autofocus></label>
-    <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
+    <div class="f"><span>Alasan</span>${listPick('note', 'reasons', listGet('reasons')[0] || '')}</div></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
       const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - stockOf(p); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
       const ok = await safe(async () => { await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
@@ -1498,7 +1497,7 @@ function ctList() {
 function contactForm(id) {
   const c = id ? contact(id) : { name: '', type: S.ct.type === 'all' ? 'pelanggan' : S.ct.type, phone: '', address: '', note: '' };
   modal(id ? 'Edit Kontak' : 'Kontak Baru', `<form id="cf"><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label>
-    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[...new Set([...listGet('ctypes'), c.type].filter(Boolean))].map(t => `<option ${c.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
+    <div class="f-row"><div class="f"><span>Jenis</span>${listPick('type', 'ctypes', c.type || listGet('ctypes')[0] || '')}</div><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
     <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>
     ${id ? contactHistory(id) : ''}`,
     { wide: !!id, foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
@@ -1707,6 +1706,37 @@ function listDel(k, i) {
   confirmBox(`Hapus <b>${esc(v)}</b> dari daftar ${LIST_META[k][0].toLowerCase()}?` + (n ? (k === 'groups' ? ` <b>${n} produk</b> akan menjadi tanpa kelompok.` : ` ${n} data yang sudah memakainya tidak berubah.`) : ''), async () => {
     await safe(async () => { if (k === 'groups') for (const p of S.d.products.filter(p => p.group_name === v)) await upd('products', p.id, { group_name: null }); await listSave(k, l.filter((_, j) => j !== i)); }, 'Dihapus');
     render(); });
+}
+/* Dropdown pilihan dari daftar + "Tambah baru" (langsung masuk ke daftar & tersimpan, juga saat offline) */
+function listPick(name, k, value, opt = {}) {
+  value = value == null ? '' : String(value);
+  const items = listItems(k), all = value && !items.includes(value) ? [...items, value] : items, id = 'lp_' + name;
+  return `<div class="lpick" id="${id}"><select class="inp" name="${esc(name)}" data-k="${k}" data-prev="${esc(value)}" onchange="lpChange(this)">
+    ${opt.empty ? `<option value="" ${!value ? 'selected' : ''}>${esc(opt.empty)}</option>` : ''}
+    ${all.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+    <option value="__new">➕ Tambah ${esc(LIST_META[k][2])} baru…</option></select>
+    <div class="lp-new" hidden><input class="inp" maxlength="40" placeholder="Nama ${esc(LIST_META[k][2])} baru" onkeydown="if(event.key==='Enter'){event.preventDefault();lpAdd('${id}')}else if(event.key==='Escape'){event.preventDefault();lpCancel('${id}')}">
+    <button type="button" class="btn primary sm" onclick="lpAdd('${id}')">Tambah</button><button type="button" class="icon-btn" title="Batal" aria-label="Batal" onclick="lpCancel('${id}')">${ic('x')}</button></div></div>`;
+}
+function lpChange(sel) {
+  if (sel.value !== '__new') { sel.dataset.prev = sel.value; return; }
+  const box = sel.parentElement, nw = box.querySelector('.lp-new');
+  sel.value = sel.dataset.prev; nw.hidden = false; const i = nw.querySelector('input'); i.value = ''; setTimeout(() => i.focus(), 30);
+}
+function lpCancel(id) { const box = document.getElementById(id); if (box) box.querySelector('.lp-new').hidden = true; }
+async function lpAdd(id) {
+  const box = document.getElementById(id); if (!box) return;
+  const sel = box.querySelector('select'), inp = box.querySelector('.lp-new input'), k = sel.dataset.k, v = inp.value.trim().replace(/\s+/g, ' ');
+  if (!v) { toast('Isi nama ' + LIST_META[k][2] + ' baru', true); return inp.focus(); }
+  const l = listItems(k), hit = l.find(x => x.toLowerCase() === v.toLowerCase());
+  const pick = val => {
+    let o = [...sel.options].find(o => o.value === val);
+    if (!o) { o = new Option(val, val); sel.insertBefore(o, sel.querySelector('option[value="__new"]')); }
+    sel.value = val; sel.dataset.prev = val; box.querySelector('.lp-new').hidden = true;
+  };
+  if (hit) { pick(hit); return toast('"' + hit + '" sudah ada di daftar — dipilih'); }
+  const ok = await safe(async () => { await listSave(k, [...l, v]); return true; }, '"' + v + '" ditambahkan ke daftar ' + LIST_META[k][2]);
+  if (ok) pick(v);
 }
 async function listReset(k) { confirmBox('Kembalikan daftar ' + LIST_META[k][0].toLowerCase() + ' ke bawaan?', async () => { await safe(() => listSave(k, [...DEFAULT_LISTS[k]]), 'Daftar dikembalikan'); render(); }, 'Kembalikan'); }
 
