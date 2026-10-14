@@ -72,4 +72,4 @@ Setelah update, naikkan `VERSION` di `sw.js` (misal `bukukas-v1.0.1`) agar peran
 - `supabase/functions/send-reminders/index.ts` — Edge Function yang dijalankan pg_cron tiap 15 menit; deploy dengan **Verify JWT = OFF** (fungsi memakai kode pengaman sendiri).
 - File `003_secrets_cron.sql` (berisi kunci rahasia, TIDAK disertakan di repo) — menyimpan kunci VAPID ke Vault & membuat jadwal cron.
 
-Aplikasi khusus Indonesia: semua nominal dalam **Rupiah**, zona waktu per usaha bisa dipilih **WIB / WITA / WIT** (dipakai untuk tanggal transaksi & jam pengingat). Database: project Supabase **bukukas** di region **Singapura (ap-southeast-1)**, region Supabase terdekat dari Indonesia. Aplikasi online di https://klmthebest10.github.io/bukukas/
+Aplikasi khusus Indonesia: semua nominal dalam **Rupiah**, zona waktu per usaha bisa dipilih **WIB / WITA / WIT** (dipakai untuk tanggal transaksi & jam pengingat). Database: project Supabase **bukukas** di region **Singapura (ap-southeast-1)**, region Supabase terdekat dari Indonesia. Aplikasi online di https://warungindonesia.my.id/
