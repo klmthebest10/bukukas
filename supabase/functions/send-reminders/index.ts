@@ -92,8 +92,9 @@ async function bizAlerts(biz: any, today: string, nowMin: number): Promise<Alert
   const st = biz.settings || {}, ns = { ...DEF, ...(st.notif || {}) }, m = { ...MODS, ...(st.mods || {}) };
   if (!ns.push) return [];
   const monthStart = today.slice(0, 8) + "01", id = biz.id;
-  const [P, D, Bu, C, T, L, K] = await Promise.all([
-    sb.from("products").select("id,name,stock,min_stock,unit,track_stock,active").eq("business_id", id),
+  const [P, MV, D, Bu, C, T, L, K] = await Promise.all([
+    sb.from("products").select("id,name,stock,stock_base,min_stock,unit,track_stock,active").eq("business_id", id),
+    sb.from("stock_moves").select("product_id,qty").eq("business_id", id),
     sb.from("debts").select("id,kind,amount,paid,due_date,contact_id,contact_name").eq("business_id", id),
     sb.from("budgets").select("id,category_id,amount").eq("business_id", id),
     sb.from("categories").select("id,name").eq("business_id", id),
@@ -101,7 +102,8 @@ async function bizAlerts(biz: any, today: string, nowMin: number): Promise<Alert
     sb.from("production_logs").select("id").eq("business_id", id).eq("date", today).limit(1),
     sb.from("contacts").select("id,name").eq("business_id", id),
   ]);
-  const prods = P.data || [], debts = D.data || [], buds = Bu.data || [], tx = T.data || [];
+  const mv: Record<string, number> = {}; for (const m of (MV.data || []) as any[]) if (m.product_id) mv[m.product_id] = (mv[m.product_id] || 0) + N(m.qty);
+  const prods = ((P.data || []) as any[]).map((p) => ({ ...p, stock: p.stock_base == null ? N(p.stock) : N(p.stock_base) + (mv[p.id] || 0) })), debts = D.data || [], buds = Bu.data || [], tx = T.data || [];
   const catName = new Map((C.data || []).map((c: any) => [c.id, c.name]));
   const cName = new Map((K.data || []).map((c: any) => [c.id, c.name]));
   const A: Alert[] = [];

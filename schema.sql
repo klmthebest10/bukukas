@@ -68,6 +68,7 @@ create table if not exists public.products (
   buy_price numeric not null default 0,
   sell_price numeric not null default 0,
   stock numeric not null default 0,
+  stock_base numeric not null default 0, -- stok = stock_base + jumlah stock_moves.qty
   min_stock numeric not null default 0,
   track_stock boolean not null default true,
   active boolean not null default true,
@@ -150,6 +151,7 @@ create table if not exists public.budgets (
 create index if not exists idx_tx_biz_date on public.transactions(business_id, date desc);
 create index if not exists idx_logs_biz_date on public.production_logs(business_id, date desc);
 create index if not exists idx_moves_biz on public.stock_moves(business_id, date desc);
+create index if not exists idx_moves_product on public.stock_moves(product_id);
 create index if not exists idx_debts_biz on public.debts(business_id);
 create index if not exists idx_prod_biz on public.products(business_id);
 

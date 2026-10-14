@@ -218,7 +218,7 @@ const B = () => S.mode === 'cloud' ? CloudSync : Local; /* CloudSync: lihat 7-sy
 
 /* operasi data (tulis ke backend + memori) */
 function stamp(row) { return { id: uid(), business_id: S.biz.id, created_at: new Date().toISOString(), ...row }; }
-async function add(t, row) { const r = stamp(row); const res = await B().insert(t, [r]); const saved = (res && res[0]) || r; S.d[t].push(saved); dataChanged(); return saved; }
+async function add(t, row) { if (t === 'stock_moves') invalidateStock(); const r = stamp(row); const res = await B().insert(t, [r]); const saved = (res && res[0]) || r; S.d[t].push(saved); dataChanged(); return saved; }
 async function addMany(t, rows) { if (!rows.length) return []; const rs = rows.map(stamp); const res = await B().insert(t, rs); const saved = (res && res.length) ? res : rs; S.d[t].push(...saved); dataChanged(); return saved; }
 async function upd(t, id, patch) { await B().update(t, id, patch); const r = S.d[t].find(x => x.id === id); if (r) Object.assign(r, patch); dataChanged(); return r; }
 async function del(t, id) { await B().remove(t, id); S.d[t] = S.d[t].filter(x => x.id !== id); dataChanged(); }
@@ -304,6 +304,12 @@ function accBalance(a, upto) {
   return b;
 }
 const totalBalance = () => sum(S.d.accounts, a => accBalance(a));
+/* STOK dihitung dari riwayat pergerakan: stok_awal (stock_base) + jumlah semua stock_moves.
+   Penjualan/stok masuk dari beberapa HP (termasuk saat offline) hanya MENAMBAH riwayat, tidak saling menimpa. */
+let _mv = null;
+function movesSum(pid) { if (!_mv) { _mv = {}; S.d.stock_moves.forEach(m => { if (m.product_id) _mv[m.product_id] = (_mv[m.product_id] || 0) + N(m.qty); }); } return _mv[pid] || 0; }
+function stockOf(p) { if (!p) return 0; return p.stock_base == null ? N(p.stock) : Math.round((N(p.stock_base) + movesSum(p.id)) * 1000) / 1000; }
+const invalidateStock = () => { _mv = null; };
 const debtLeft = d => Math.max(0, N(d.amount) - N(d.paid));
 /* transaksi pembayaran hutang/piutang (bukan transaksi pencairan pinjaman) */
 const isDebtPay = t => { if (t.ref !== 'debt') return false; const d = byId('debts', t.debt_id); return !d || (d.kind === 'piutang' ? t.type === 'in' : t.type === 'out'); };

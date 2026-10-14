@@ -218,7 +218,7 @@ const B = () => S.mode === 'cloud' ? CloudSync : Local; /* CloudSync: lihat 7-sy
 
 /* operasi data (tulis ke backend + memori) */
 function stamp(row) { return { id: uid(), business_id: S.biz.id, created_at: new Date().toISOString(), ...row }; }
-async function add(t, row) { const r = stamp(row); const res = await B().insert(t, [r]); const saved = (res && res[0]) || r; S.d[t].push(saved); dataChanged(); return saved; }
+async function add(t, row) { if (t === 'stock_moves') invalidateStock(); const r = stamp(row); const res = await B().insert(t, [r]); const saved = (res && res[0]) || r; S.d[t].push(saved); dataChanged(); return saved; }
 async function addMany(t, rows) { if (!rows.length) return []; const rs = rows.map(stamp); const res = await B().insert(t, rs); const saved = (res && res.length) ? res : rs; S.d[t].push(...saved); dataChanged(); return saved; }
 async function upd(t, id, patch) { await B().update(t, id, patch); const r = S.d[t].find(x => x.id === id); if (r) Object.assign(r, patch); dataChanged(); return r; }
 async function del(t, id) { await B().remove(t, id); S.d[t] = S.d[t].filter(x => x.id !== id); dataChanged(); }
@@ -304,6 +304,12 @@ function accBalance(a, upto) {
   return b;
 }
 const totalBalance = () => sum(S.d.accounts, a => accBalance(a));
+/* STOK dihitung dari riwayat pergerakan: stok_awal (stock_base) + jumlah semua stock_moves.
+   Penjualan/stok masuk dari beberapa HP (termasuk saat offline) hanya MENAMBAH riwayat, tidak saling menimpa. */
+let _mv = null;
+function movesSum(pid) { if (!_mv) { _mv = {}; S.d.stock_moves.forEach(m => { if (m.product_id) _mv[m.product_id] = (_mv[m.product_id] || 0) + N(m.qty); }); } return _mv[pid] || 0; }
+function stockOf(p) { if (!p) return 0; return p.stock_base == null ? N(p.stock) : Math.round((N(p.stock_base) + movesSum(p.id)) * 1000) / 1000; }
+const invalidateStock = () => { _mv = null; };
 const debtLeft = d => Math.max(0, N(d.amount) - N(d.paid));
 /* transaksi pembayaran hutang/piutang (bukan transaksi pencairan pinjaman) */
 const isDebtPay = t => { if (t.ref !== 'debt') return false; const d = byId('debts', t.debt_id); return !d || (d.kind === 'piutang' ? t.type === 'in' : t.type === 'out'); };
@@ -495,9 +501,18 @@ async function openBiz(b) {
   S.biz = normalizeBiz(b); APP_TZ = S.biz.settings.tz || 'Asia/Jakarta'; LS.set('bk_biz', b.id); S.cart = []; screen('<div class="loader"></div>');
   try { S.d = await B().load(b.id); } catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data usaha.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><button class="btn primary block" onclick="openBiz(S.businesses.find(x=>x.id==='${b.id}')||S.biz)">Coba lagi</button></div>`); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
+  await migrateStock();
   shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
   if (S.mode === 'cloud') { Sync.ui(); if (S.offline) toast('📴 Mode offline — data dari perangkat ini. Perubahan dikirim otomatis saat online.'); else setTimeout(() => Sync.flush(), 1200); }
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
+}
+
+/* sekali jalan: produk lama tanpa stock_base → hitung dari stok tercatat dikurangi riwayat */
+async function migrateStock() {
+  invalidateStock();
+  const legacy = S.d.products.filter(p => p.stock_base == null); if (!legacy.length) return;
+  for (const p of legacy) { const base = N(p.stock) - movesSum(p.id); try { await B().update('products', p.id, { stock_base: base }); } catch (e) { /* dicoba lagi lain kali */ } p.stock_base = base; }
+  invalidateStock(); Snap.save();
 }
 
 /* ---------------- wizard usaha baru ---------------- */
@@ -532,7 +547,7 @@ async function seedBiz(T, cash, sample) {
   const accs = await addMany('accounts', [{ name: 'Kas Tunai', type: 'kas', opening_balance: cash, color: '#0d9488' }, { name: 'Rekening Bank', type: 'bank', opening_balance: 0, color: '#4f46e5' }, { name: 'E-Wallet / QRIS', type: 'ewallet', opening_balance: 0, color: '#d97706' }]);
   let i = 0;
   const cs = await addMany('categories', [...T.inc.map(([n, e]) => ({ name: n, type: 'in', icon: e, color: PALETTE[i++ % 12] })), ...T.out.map(([n, e]) => ({ name: n, type: 'out', icon: e, color: PALETTE[i++ % 12] }))]);
-  const prods = await addMany('products', T.products.map(p => ({ name: p[0], unit: p[1], buy_price: p[2], sell_price: p[3], stock: sample ? p[4] : 0, min_stock: p[5], track_stock: p[6] !== false, active: true })));
+  const prods = await addMany('products', T.products.map(p => ({ name: p[0], unit: p[1], buy_price: p[2], sell_price: p[3], stock: sample ? p[4] : 0, stock_base: sample ? p[4] : 0, min_stock: p[5], track_stock: p[6] !== false, active: true })));
   if (!sample) return;
   const R = (a, b) => a + Math.random() * (b - a), RI = (a, b) => Math.round(R(a, b));
   const inC = cs.filter(c => c.type === 'in'), outC = cs.filter(c => c.type === 'out');
@@ -609,6 +624,7 @@ const PAGES = {};
 function go(p) { if (!navAllowed(p)) p = 'dashboard'; S.page = p; closeOverlays(); closeModal(); render(); window.scrollTo({ top: 0 }); try { history.replaceState(null, '', location.pathname + (p !== 'dashboard' ? '?page=' + p : '')); } catch (e) {} }
 function render() {
   if (!S.biz || !$('#content')) return;
+  invalidateStock();
   S.charts.forEach(c => { try { c.destroy(); } catch (e) {} }); S.charts = [];
   $$('[data-nav]').forEach(b => b.classList.toggle('on', b.dataset.nav === S.page));
   const pg = PAGES[S.page] || PAGES.dashboard; const n = NAV.find(x => x.id === S.page);
@@ -620,7 +636,7 @@ function render() {
   updateBell(); cacheBizSummary(); Sync.ui();
 }
 function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam') + ' 👋 ' + fmtDay(today()); }
-let _dc; function dataChanged() { Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
+let _dc; function dataChanged() { invalidateStock(); Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
   modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
@@ -647,8 +663,8 @@ function computeAlerts() {
   if (!S.biz) return [];
   const ns = notifSet(), m = mods(), A = [], now = nowTZ(), t = now.date;
   const [hh, mm] = (ns.jam || '19:00').split(':').map(Number); const pastJam = now.h * 60 + now.m >= hh * 60 + (mm || 0);
-  if (ns.stok && m.stok) S.d.products.filter(p => p.active !== false && p.track_stock !== false && N(p.min_stock) > 0 && N(p.stock) <= N(p.min_stock)).forEach(p =>
-    A.push({ id: 'stok-' + p.id + '-' + N(p.stock), lv: N(p.stock) <= 0 ? 'danger' : 'warn', e: '📦', t: (N(p.stock) <= 0 ? 'Stok habis: ' : 'Stok menipis: ') + p.name, b: 'Sisa ' + numf(p.stock, 2) + ' ' + (p.unit || '') + ' (minimum ' + numf(p.min_stock) + ')', page: 'stok' }));
+  if (ns.stok && m.stok) S.d.products.filter(p => p.active !== false && p.track_stock !== false && N(p.min_stock) > 0 && stockOf(p) <= N(p.min_stock)).forEach(p =>
+    A.push({ id: 'stok-' + p.id + '-' + stockOf(p), lv: stockOf(p) <= 0 ? 'danger' : 'warn', e: '📦', t: (stockOf(p) <= 0 ? 'Stok habis: ' : 'Stok menipis: ') + p.name, b: 'Sisa ' + numf(stockOf(p), 2) + ' ' + (p.unit || '') + ' (minimum ' + numf(p.min_stock) + ')', page: 'stok' }));
   const H = N(ns.hari_jatuh_tempo) || 3;
   ['piutang', 'hutang'].forEach(k => { if (!ns[k] || !m.hutang) return; openDebts(k).filter(d => d.due_date && d.due_date <= addDays(t, H)).forEach(d => {
     const late = d.due_date < t, dd = diffDays(t, d.due_date);
@@ -846,7 +862,7 @@ function insights(r, T, P) {
   if (P.profit && T.profit !== P.profit) { const up = T.profit > P.profit; out.push([up ? '📈' : '📉', `Laba ${up ? 'naik' : 'turun'} <b>${money(Math.abs(T.profit - P.profit))}</b> dibanding periode sebelumnya.`]); }
   if (T.profit < 0) out.push(['⚠️', 'Pengeluaran lebih besar dari pemasukan. Tinjau biaya terbesar Anda.']);
   const pi = sum(openDebts('piutang'), debtLeft); if (pi) out.push(['📥', `Uang di pelanggan (piutang) belum tertagih: <b>${money(pi)}</b>.`]);
-  const low = S.d.products.filter(p => p.track_stock !== false && N(p.min_stock) > 0 && N(p.stock) <= N(p.min_stock)).length; if (low) out.push(['📦', `<b>${low} produk</b> stoknya menipis — segera belanja ulang.`]);
+  const low = S.d.products.filter(p => p.track_stock !== false && N(p.min_stock) > 0 && stockOf(p) <= N(p.min_stock)).length; if (low) out.push(['📦', `<b>${low} produk</b> stoknya menipis — segera belanja ulang.`]);
   return out.slice(0, 6);
 }
 function prodSummaryCard(r) {
@@ -983,7 +999,6 @@ function deleteTx(id) {
   confirmBox('Hapus transaksi <b>' + esc(txTitle(t)) + '</b> sebesar <b>' + money(t.amount) + '</b>?' + note, async () => {
     await safe(async () => {
       if ((t.ref === 'sale' || t.ref === 'purchase') && t.items) {
-        for (const it of t.items) { const p = prod(it.pid); if (p && p.track_stock !== false) await upd('products', p.id, { stock: N(p.stock) + (t.ref === 'sale' ? 1 : -1) * N(it.qty) }); }
         for (const mv of S.d.stock_moves.filter(x => x.transaction_id === t.id)) await del('stock_moves', mv.id);
       }
       if (t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) - N(t.amount)) }); }
@@ -1015,8 +1030,8 @@ function renderPGrid() {
   const q = S.kasir.q.trim().toLowerCase();
   const ps = S.d.products.filter(p => p.active !== false && (!S.kasir.grp || p.group_name === S.kasir.grp) && (!q || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
   const g = $('#pgrid'); if (!g) return;
-  g.innerHTML = ps.length ? ps.map(p => { const inCart = S.cart.find(c => c.pid === p.id); const low = p.track_stock !== false && N(p.stock) <= N(p.min_stock);
-    return `<div class="pcard ${low ? 'low' : ''}" role="button" tabindex="0" onclick="cartAdd('${p.id}')" onkeydown="if(event.key==='Enter')cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? (N(p.stock) <= 0 ? 'Stok habis' : 'Stok ' + numf(p.stock, 2) + ' ' + esc(p.unit || '')) : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
+  g.innerHTML = ps.length ? ps.map(p => { const inCart = S.cart.find(c => c.pid === p.id); const low = p.track_stock !== false && stockOf(p) <= N(p.min_stock);
+    return `<div class="pcard ${low ? 'low' : ''}" role="button" tabindex="0" onclick="cartAdd('${p.id}')" onkeydown="if(event.key==='Enter')cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? (stockOf(p) <= 0 ? 'Stok habis' : 'Stok ' + numf(stockOf(p), 2) + ' ' + esc(p.unit || '')) : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
     : `<div class="empty" style="grid-column:1/-1"><div class="e">📦</div><p>${S.d.products.length ? 'Produk tidak ditemukan.' : 'Belum ada produk.'}</p><button class="btn primary sm" onclick="productForm()">${ic('plus')} Tambah Produk</button></div>`;
 }
 const cartTotal = () => sum(S.cart, c => N(c.qty) * N(c.price));
@@ -1025,7 +1040,7 @@ function cartAdd(pid) {
   const p = prod(pid); if (!p) return; const c = S.cart.find(x => x.pid === pid);
   if (c) c.qty = N(c.qty) + 1; else S.cart.push({ pid, name: p.name, price: N(p.sell_price), cost: N(p.buy_price), qty: 1, unit: p.unit });
   const q = (c || S.cart[S.cart.length - 1]).qty;
-  if (p.track_stock !== false && q > N(p.stock)) toast('⚠️ Stok ' + p.name + ' tidak mencukupi (sisa ' + numf(p.stock, 2) + ')', true);
+  if (p.track_stock !== false && q > stockOf(p)) toast('⚠️ Stok ' + p.name + ' tidak mencukupi (sisa ' + numf(stockOf(p), 2) + ')', true);
   if (navigator.vibrate) navigator.vibrate(12);
   cartChanged();
 }
@@ -1119,7 +1134,7 @@ async function doCheckout() {
       const d = await add('debts', { kind: 'piutang', contact_id: cid, amount: total, paid: dp, date, due_date: f.due || null, category_id: f.cat, source: 'sale', note: ('Penjualan: ' + items.map(i => i.name + ' x' + i.qty).join(', ')).slice(0, 280) + (discNote ? ' • ' + discNote : '') });
       if (dp) await add('transactions', { date, type: 'in', amount: dp, account_id: f.dp_acc, contact_id: cid, ref: 'debt', debt_id: d.id, category_id: f.cat, note: 'Uang muka penjualan' });
     } else await add('transactions', { id: txId, date, type: 'in', amount: total, category_id: f.cat, account_id: method, contact_id: cid, ref: 'sale', items, cost, note: [f.note.trim(), discNote].filter(Boolean).join(' • ') });
-    for (const it of items) { const p = prod(it.pid); if (!p || p.track_stock === false) continue; await upd('products', p.id, { stock: N(p.stock) - it.qty }); await add('stock_moves', { product_id: p.id, date, qty: -it.qty, kind: 'sale', note: credit ? 'Penjualan (piutang)' : 'Penjualan', transaction_id: credit ? null : txId }); }
+    for (const it of items) { const p = prod(it.pid); if (!p || p.track_stock === false) continue; await add('stock_moves', { product_id: p.id, date, qty: -it.qty, kind: 'sale', note: credit ? 'Penjualan (piutang)' : 'Penjualan', transaction_id: credit ? null : txId }); }
     if (f.cat !== S.biz.settings.sale_cat) { S.biz.settings.sale_cat = f.cat; updBiz({ settings: S.biz.settings }).catch(() => {}); }
     return { cid };
   });
@@ -1149,11 +1164,11 @@ S.stok = { q: '', f: 'all' };
 PAGES.stok = {
   html() {
     const ps = S.d.products, tr = ps.filter(p => p.track_stock !== false && p.active !== false);
-    const low = tr.filter(p => N(p.min_stock) > 0 && N(p.stock) <= N(p.min_stock));
+    const low = tr.filter(p => N(p.min_stock) > 0 && stockOf(p) <= N(p.min_stock));
     return `<div class="grid g4 mb">
       <div class="card kpi"><span class="k-lbl">Produk Aktif</span><div class="k-val">${ps.filter(p => p.active !== false).length}</div><span class="xs muted">${ps.length} total</span></div>
-      <div class="card kpi"><span class="k-lbl">Nilai Stok (Modal)</span><div class="k-val num">${money(sum(tr, p => Math.max(0, N(p.stock)) * N(p.buy_price)))}</div><span class="xs muted">harga beli × stok</span></div>
-      <div class="card kpi"><span class="k-lbl">Potensi Penjualan</span><div class="k-val num c-in">${money(sum(tr, p => Math.max(0, N(p.stock)) * N(p.sell_price)))}</div><span class="xs muted">harga jual × stok</span></div>
+      <div class="card kpi"><span class="k-lbl">Nilai Stok (Modal)</span><div class="k-val num">${money(sum(tr, p => Math.max(0, stockOf(p)) * N(p.buy_price)))}</div><span class="xs muted">harga beli × stok</span></div>
+      <div class="card kpi"><span class="k-lbl">Potensi Penjualan</span><div class="k-val num c-in">${money(sum(tr, p => Math.max(0, stockOf(p)) * N(p.sell_price)))}</div><span class="xs muted">harga jual × stok</span></div>
       <div class="card kpi" style="cursor:pointer" onclick="S.stok.f='low';render()"><span class="k-lbl">Stok Menipis</span><div class="k-val ${low.length ? 'c-out' : ''}">${low.length}</div><span class="xs muted">produk perlu belanja</span></div></div>
     <div class="toolbar"><div class="search"><span>${ic('search')}</span><input class="inp" placeholder="Cari produk…" value="${esc(S.stok.q)}" oninput="S.stok.q=this.value;stokList()"></div>
       <button class="btn" onclick="stockInPick()">${ic('download')} Stok Masuk</button><button class="btn primary" onclick="productForm()">${ic('plus')} Produk</button></div>
@@ -1165,17 +1180,17 @@ PAGES.stok = {
 function stokList() {
   const q = S.stok.q.trim().toLowerCase(), f = S.stok.f;
   const ps = S.d.products.filter(p => (!q || (p.name + ' ' + (p.sku || '') + ' ' + (p.group_name || '')).toLowerCase().includes(q)) &&
-    (f === 'all' ? p.active !== false : f === 'low' ? (p.active !== false && p.track_stock !== false && N(p.stock) <= N(p.min_stock)) : f === 'notrack' ? p.track_stock === false : p.active === false)).sort((a, b) => a.name.localeCompare(b.name));
-  $('#stokList').innerHTML = ps.length ? ps.map(p => { const low = p.track_stock !== false && N(p.stock) <= N(p.min_stock), mg = N(p.sell_price) - N(p.buy_price);
+    (f === 'all' ? p.active !== false : f === 'low' ? (p.active !== false && p.track_stock !== false && stockOf(p) <= N(p.min_stock)) : f === 'notrack' ? p.track_stock === false : p.active === false)).sort((a, b) => a.name.localeCompare(b.name));
+  $('#stokList').innerHTML = ps.length ? ps.map(p => { const low = p.track_stock !== false && stockOf(p) <= N(p.min_stock), mg = N(p.sell_price) - N(p.buy_price);
     return `<div class="li" onclick="productMenu('${p.id}')"><div class="av" style="background:var(--primary-soft);color:var(--primary);font-weight:800;font-size:15px">${esc(initials(p.name))}</div>
     <div class="grow"><div class="t ell">${esc(p.name)} ${p.active === false ? '<span class="pill neutral">nonaktif</span>' : ''}</div><div class="s ell">${[p.group_name, p.sku, 'Beli ' + money(p.buy_price), 'Jual ' + money(p.sell_price), N(p.buy_price) ? 'Margin ' + pct(mg, p.sell_price).toFixed(0) + '%' : ''].filter(Boolean).map(esc).join(' • ')}</div></div>
-    <div style="text-align:right">${p.track_stock !== false ? `<div class="amt num ${low ? 'c-out' : ''}">${numf(p.stock, 2)} <small class="muted">${esc(p.unit || '')}</small></div>${low ? `<span class="pill ${N(p.stock) <= 0 ? 'out' : 'warn'}">${N(p.stock) <= 0 ? 'Habis' : 'Menipis'}</span>` : ''}` : '<span class="pill neutral">tanpa stok</span>'}</div></div>`; }).join('')
+    <div style="text-align:right">${p.track_stock !== false ? `<div class="amt num ${low ? 'c-out' : ''}">${numf(stockOf(p), 2)} <small class="muted">${esc(p.unit || '')}</small></div>${low ? `<span class="pill ${stockOf(p) <= 0 ? 'out' : 'warn'}">${stockOf(p) <= 0 ? 'Habis' : 'Menipis'}</span>` : ''}` : '<span class="pill neutral">tanpa stok</span>'}</div></div>`; }).join('')
     : `<div class="empty"><div class="e">📦</div><p>${S.d.products.length ? 'Tidak ada produk di filter ini.' : 'Belum ada produk. Tambahkan barang yang Anda jual / simpan.'}</p><button class="btn primary sm" onclick="productForm()">${ic('plus')} Tambah Produk</button></div>`;
 }
 function productMenu(id) {
   const p = prod(id); if (!p) return;
   const moves = S.d.stock_moves.filter(m => m.product_id === id).sort((a, b) => a.date === b.date ? String(b.created_at).localeCompare(String(a.created_at)) : a.date < b.date ? 1 : -1).slice(0, 30);
-  modal(esc(p.name), `<div class="grid g3 mb"><div><div class="xs muted">Stok</div><b class="num" style="font-size:18px">${p.track_stock !== false ? numf(p.stock, 2) + ' ' + esc(p.unit || '') : '—'}</b></div><div><div class="xs muted">Harga beli</div><b class="num">${money(p.buy_price)}</b></div><div><div class="xs muted">Harga jual</div><b class="num c-in">${money(p.sell_price)}</b></div></div>
+  modal(esc(p.name), `<div class="grid g3 mb"><div><div class="xs muted">Stok</div><b class="num" style="font-size:18px">${p.track_stock !== false ? numf(stockOf(p), 2) + ' ' + esc(p.unit || '') : '—'}</b></div><div><div class="xs muted">Harga beli</div><b class="num">${money(p.buy_price)}</b></div><div><div class="xs muted">Harga jual</div><b class="num c-in">${money(p.sell_price)}</b></div></div>
     <div class="row wrap mb">${p.track_stock !== false ? `<button class="btn sm" onclick="stockIn('${id}')">${ic('download')} Stok Masuk</button><button class="btn sm" onclick="opname('${id}')">${ic('check')} Opname / Sesuaikan</button>` : ''}<button class="btn sm" onclick="productForm('${id}')">${ic('edit')} Edit</button><button class="btn sm danger" onclick="deleteProduct('${id}')">${ic('trash')} Hapus</button></div>
     <h4 style="margin:6px 0">Riwayat stok</h4>${moves.length ? `<div class="tbl-wrap"><table class="tbl"><tr><th>Tanggal</th><th>Jenis</th><th class="r">Jumlah</th><th>Catatan</th></tr>${moves.map(m => `<tr><td>${fmtDate(m.date)}</td><td>${{ in: '📥 Masuk', sale: '🛒 Terjual', adjust: '⚖️ Penyesuaian', out: '📤 Keluar' }[m.kind] || m.kind}</td><td class="r num ${N(m.qty) < 0 ? 'c-out' : 'c-in'}">${N(m.qty) > 0 ? '+' : ''}${numf(m.qty, 2)}</td><td class="xs muted">${esc(m.note || '')}</td></tr>`).join('')}</table></div>` : '<p class="muted small">Belum ada pergerakan stok.</p>'}`, { wide: true });
 }
@@ -1187,7 +1202,7 @@ function productForm(id) {
     <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${[...new Set([...listGet('groups'), ...groups])].map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
       <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${listGet('units').map(u => `<option value="${esc(u)}">`).join('')}</datalist></label></div>
     <div class="f-row"><label class="f"><span>Harga beli / modal</span>${moneyInput('buy_price', p.buy_price)}</label><label class="f"><span>Harga jual</span>${moneyInput('sell_price', p.sell_price)}</label></div>
-    <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${p.stock === '' ? '' : N(p.stock)}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
+    <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${id ? stockOf(p) : ''}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
     <label class="f"><span>Kode / SKU (opsional)</span><input class="inp" name="sku" value="${esc(p.sku || '')}"></label>
     <div class="set-row"><div class="t grow"><b>Lacak stok</b><small>Matikan untuk jasa / menu masakan</small></div><label class="switch"><input type="checkbox" name="track_stock" ${p.track_stock !== false ? 'checked' : ''}><i></i></label></div>
     <div class="set-row"><div class="t grow"><b>Aktif</b><small>Produk nonaktif tidak tampil di kasir</small></div><label class="switch"><input type="checkbox" name="active" ${p.active !== false ? 'checked' : ''}><i></i></label></div>
@@ -1196,14 +1211,14 @@ function productForm(id) {
     if (S.d.products.some(x => x.id !== id && x.name.trim().toLowerCase() === f.name.trim().toLowerCase())) return toast('Produk dengan nama ini sudah ada', true);
     if (N(f.min_stock) < 0 || (!id && N(f.stock) < 0)) return toast('Stok tidak boleh minus', true);
     const row = { name: f.name.trim(), group_name: f.group_name.trim() || null, unit: f.unit.trim() || 'pcs', buy_price: parseMoney(f.buy_price), sell_price: parseMoney(f.sell_price), min_stock: N(f.min_stock), sku: f.sku.trim() || null, track_stock: !!f.track_stock, active: !!f.active };
-    const ok = await safe(async () => { if (id) await upd('products', id, row); else { const np = await add('products', { ...row, stock: N(f.stock) }); if (N(f.stock)) await add('stock_moves', { product_id: np.id, date: today(), qty: N(f.stock), kind: 'adjust', note: 'Stok awal' }); } return true; }, 'Produk disimpan');
+    const ok = await safe(async () => { if (id) await upd('products', id, row); else { const np = await add('products', { ...row, stock: N(f.stock), stock_base: 0 }); if (N(f.stock)) await add('stock_moves', { product_id: np.id, date: today(), qty: N(f.stock), kind: 'adjust', note: 'Stok awal' }); } return true; }, 'Produk disimpan');
     if (ok) { closeModal(); render(); } } });
 }
 function deleteProduct(id) { const p = prod(id); confirmBox('Hapus produk <b>' + esc(p.name) + '</b>? Riwayat stoknya ikut terhapus (transaksi tetap ada). Tip: nonaktifkan saja jika masih ingin menyimpan datanya.', async () => { await safe(async () => { for (const m of S.d.stock_moves.filter(x => x.product_id === id)) S.d.stock_moves = S.d.stock_moves.filter(x => x.id !== m.id); if (S.mode === 'local') { const db = Local.db(); db.stock_moves = (db.stock_moves || []).filter(x => x.product_id !== id); Local.save(db); } await del('products', id); }, 'Produk dihapus'); render(); }); }
 function stockInPick() {
   const ps = S.d.products.filter(p => p.active !== false && p.track_stock !== false);
   if (!ps.length) return productForm();
-  modal('Pilih Produk', `<input class="inp mb" placeholder="Cari…" oninput="$$('#spl .li').forEach(x=>x.style.display=x.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"><div class="list" id="spl">${ps.map(p => `<div class="li" onclick="stockIn('${p.id}')"><div class="av">📦</div><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">Stok ${numf(p.stock, 2)} ${esc(p.unit || '')}</div></div></div>`).join('')}</div>
+  modal('Pilih Produk', `<input class="inp mb" placeholder="Cari…" oninput="$$('#spl .li').forEach(x=>x.style.display=x.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"><div class="list" id="spl">${ps.map(p => `<div class="li" onclick="stockIn('${p.id}')"><div class="av">📦</div><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">Stok ${numf(stockOf(p), 2)} ${esc(p.unit || '')}</div></div></div>`).join('')}</div>
     <button class="btn block mt" onclick="productForm()">${ic('plus')} Produk baru</button>`);
 }
 function stockIn(pid) {
@@ -1232,8 +1247,7 @@ async function saveStockIn(pid) {
     let txId = null; const items = [{ pid, name: p.name, qty, price, cost: price, unit: p.unit }];
     if (f.pay === 'credit') await add('debts', { kind: 'hutang', contact_id: f.contact_id || null, amount: total, paid: 0, date: f.date, due_date: f.due || null, category_id: f.cat, source: 'purchase', note: 'Pembelian ' + p.name + ' ' + qty + ' ' + (p.unit || '') });
     else if (f.pay !== 'none' && total > 0) txId = (await add('transactions', { date: f.date, type: 'out', amount: total, category_id: f.cat, account_id: f.pay, contact_id: f.contact_id || null, ref: 'purchase', items, note: f.note || ('Beli ' + p.name) })).id;
-    const patch = { stock: N(p.stock) + qty }; if (price && f.pay !== 'none') patch.buy_price = price;
-    await upd('products', pid, patch);
+    if (price && f.pay !== 'none' && price !== N(p.buy_price)) await upd('products', pid, { buy_price: price });
     await add('stock_moves', { product_id: pid, date: f.date, qty, kind: 'in', note: f.pay === 'none' ? (f.note || 'Hasil produksi') : (f.note || 'Pembelian'), transaction_id: txId });
     return true;
   }, 'Stok ' + p.name + ' bertambah ' + numf(qty, 2));
@@ -1241,12 +1255,12 @@ async function saveStockIn(pid) {
 }
 function opname(pid) {
   const p = prod(pid);
-  modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(p.stock, 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
-    <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${N(p.stock)}" autofocus></label>
+  modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(stockOf(p), 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
+    <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${stockOf(p)}" autofocus></label>
     <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
-      const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - N(p.stock); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
-      const ok = await safe(async () => { await upd('products', pid, { stock: real }); await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
+      const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - stockOf(p); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
+      const ok = await safe(async () => { await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
       if (ok) { closeModal(); render(); } } });
 }
 
@@ -1422,7 +1436,7 @@ PAGES.laporan = {
             return `<tr><td>${esc(a.name)}</td><td class="r num">${short(st)}</td><td class="r num c-in">${short(i)}</td><td class="r num c-out">${short(o)}</td><td class="r num"><b>${money(en)}</b></td></tr>`; }).join('')}
           <tr class="tot"><td>Total</td><td class="r num">${short(sum(S.d.accounts, a => accBalance(a, addDays(r.from, -1))))}</td><td class="r num c-in">${short(T.cin)}</td><td class="r num c-out">${short(T.cout)}</td><td class="r num">${money(sum(S.d.accounts, a => accBalance(a, r.to)))}</td></tr></table></div></div>
         <div class="card"><div class="card-h"><h3>🤝 Hutang & Piutang (saat ini)</h3></div><div class="row between small"><span>Piutang belum tertagih (${pi.length})</span><b class="num c-in">${money(sum(pi, debtLeft))}</b></div><div class="row between small mt" style="margin-top:8px"><span>Hutang belum dibayar (${hu.length})</span><b class="num c-out">${money(sum(hu, debtLeft))}</b></div>
-          <div class="row between small" style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px"><span>Kekayaan bersih usaha (kas + piutang + stok − hutang)</span><b class="num">${money(totalBalance() + sum(pi, debtLeft) + sum(S.d.products.filter(p => p.track_stock !== false), p => Math.max(0, N(p.stock)) * N(p.buy_price)) - sum(hu, debtLeft))}</b></div></div>
+          <div class="row between small" style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px"><span>Kekayaan bersih usaha (kas + piutang + stok − hutang)</span><b class="num">${money(totalBalance() + sum(pi, debtLeft) + sum(S.d.products.filter(p => p.track_stock !== false), p => Math.max(0, stockOf(p)) * N(p.buy_price)) - sum(hu, debtLeft))}</b></div></div>
       </div>
     </div>
     <div class="card mb"><div class="card-h"><h3>📈 Tren 12 Bulan Terakhir</h3></div><div class="chart-box"><canvas id="cTrend"></canvas></div></div>
@@ -1785,7 +1799,7 @@ async function bizDuplicate(id) {
         const copy = (rows, extra) => rows.map(r => { const o = { ...r, ...extra }; delete o.user_id; map[r.id] = o.id = uid(); o.business_id = saved.id; o.created_at = new Date().toISOString(); return o; });
         await B().insert('accounts', copy(data.accounts, { opening_balance: 0 }));
         await B().insert('categories', copy(data.categories, {}));
-        await B().insert('products', copy(data.products, { stock: 0 }));
+        await B().insert('products', copy(data.products, { stock: 0, stock_base: 0 }));
         await B().insert('contacts', copy(data.contacts, {}));
         await B().insert('budgets', copy(data.budgets, {}).map(b => ({ ...b, category_id: map[b.category_id] || null })).filter(b => b.category_id));
         closeModal(); await openBiz(saved); return true;

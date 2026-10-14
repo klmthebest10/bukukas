@@ -5,11 +5,11 @@ S.stok = { q: '', f: 'all' };
 PAGES.stok = {
   html() {
     const ps = S.d.products, tr = ps.filter(p => p.track_stock !== false && p.active !== false);
-    const low = tr.filter(p => N(p.min_stock) > 0 && N(p.stock) <= N(p.min_stock));
+    const low = tr.filter(p => N(p.min_stock) > 0 && stockOf(p) <= N(p.min_stock));
     return `<div class="grid g4 mb">
       <div class="card kpi"><span class="k-lbl">Produk Aktif</span><div class="k-val">${ps.filter(p => p.active !== false).length}</div><span class="xs muted">${ps.length} total</span></div>
-      <div class="card kpi"><span class="k-lbl">Nilai Stok (Modal)</span><div class="k-val num">${money(sum(tr, p => Math.max(0, N(p.stock)) * N(p.buy_price)))}</div><span class="xs muted">harga beli × stok</span></div>
-      <div class="card kpi"><span class="k-lbl">Potensi Penjualan</span><div class="k-val num c-in">${money(sum(tr, p => Math.max(0, N(p.stock)) * N(p.sell_price)))}</div><span class="xs muted">harga jual × stok</span></div>
+      <div class="card kpi"><span class="k-lbl">Nilai Stok (Modal)</span><div class="k-val num">${money(sum(tr, p => Math.max(0, stockOf(p)) * N(p.buy_price)))}</div><span class="xs muted">harga beli × stok</span></div>
+      <div class="card kpi"><span class="k-lbl">Potensi Penjualan</span><div class="k-val num c-in">${money(sum(tr, p => Math.max(0, stockOf(p)) * N(p.sell_price)))}</div><span class="xs muted">harga jual × stok</span></div>
       <div class="card kpi" style="cursor:pointer" onclick="S.stok.f='low';render()"><span class="k-lbl">Stok Menipis</span><div class="k-val ${low.length ? 'c-out' : ''}">${low.length}</div><span class="xs muted">produk perlu belanja</span></div></div>
     <div class="toolbar"><div class="search"><span>${ic('search')}</span><input class="inp" placeholder="Cari produk…" value="${esc(S.stok.q)}" oninput="S.stok.q=this.value;stokList()"></div>
       <button class="btn" onclick="stockInPick()">${ic('download')} Stok Masuk</button><button class="btn primary" onclick="productForm()">${ic('plus')} Produk</button></div>
@@ -21,17 +21,17 @@ PAGES.stok = {
 function stokList() {
   const q = S.stok.q.trim().toLowerCase(), f = S.stok.f;
   const ps = S.d.products.filter(p => (!q || (p.name + ' ' + (p.sku || '') + ' ' + (p.group_name || '')).toLowerCase().includes(q)) &&
-    (f === 'all' ? p.active !== false : f === 'low' ? (p.active !== false && p.track_stock !== false && N(p.stock) <= N(p.min_stock)) : f === 'notrack' ? p.track_stock === false : p.active === false)).sort((a, b) => a.name.localeCompare(b.name));
-  $('#stokList').innerHTML = ps.length ? ps.map(p => { const low = p.track_stock !== false && N(p.stock) <= N(p.min_stock), mg = N(p.sell_price) - N(p.buy_price);
+    (f === 'all' ? p.active !== false : f === 'low' ? (p.active !== false && p.track_stock !== false && stockOf(p) <= N(p.min_stock)) : f === 'notrack' ? p.track_stock === false : p.active === false)).sort((a, b) => a.name.localeCompare(b.name));
+  $('#stokList').innerHTML = ps.length ? ps.map(p => { const low = p.track_stock !== false && stockOf(p) <= N(p.min_stock), mg = N(p.sell_price) - N(p.buy_price);
     return `<div class="li" onclick="productMenu('${p.id}')"><div class="av" style="background:var(--primary-soft);color:var(--primary);font-weight:800;font-size:15px">${esc(initials(p.name))}</div>
     <div class="grow"><div class="t ell">${esc(p.name)} ${p.active === false ? '<span class="pill neutral">nonaktif</span>' : ''}</div><div class="s ell">${[p.group_name, p.sku, 'Beli ' + money(p.buy_price), 'Jual ' + money(p.sell_price), N(p.buy_price) ? 'Margin ' + pct(mg, p.sell_price).toFixed(0) + '%' : ''].filter(Boolean).map(esc).join(' • ')}</div></div>
-    <div style="text-align:right">${p.track_stock !== false ? `<div class="amt num ${low ? 'c-out' : ''}">${numf(p.stock, 2)} <small class="muted">${esc(p.unit || '')}</small></div>${low ? `<span class="pill ${N(p.stock) <= 0 ? 'out' : 'warn'}">${N(p.stock) <= 0 ? 'Habis' : 'Menipis'}</span>` : ''}` : '<span class="pill neutral">tanpa stok</span>'}</div></div>`; }).join('')
+    <div style="text-align:right">${p.track_stock !== false ? `<div class="amt num ${low ? 'c-out' : ''}">${numf(stockOf(p), 2)} <small class="muted">${esc(p.unit || '')}</small></div>${low ? `<span class="pill ${stockOf(p) <= 0 ? 'out' : 'warn'}">${stockOf(p) <= 0 ? 'Habis' : 'Menipis'}</span>` : ''}` : '<span class="pill neutral">tanpa stok</span>'}</div></div>`; }).join('')
     : `<div class="empty"><div class="e">📦</div><p>${S.d.products.length ? 'Tidak ada produk di filter ini.' : 'Belum ada produk. Tambahkan barang yang Anda jual / simpan.'}</p><button class="btn primary sm" onclick="productForm()">${ic('plus')} Tambah Produk</button></div>`;
 }
 function productMenu(id) {
   const p = prod(id); if (!p) return;
   const moves = S.d.stock_moves.filter(m => m.product_id === id).sort((a, b) => a.date === b.date ? String(b.created_at).localeCompare(String(a.created_at)) : a.date < b.date ? 1 : -1).slice(0, 30);
-  modal(esc(p.name), `<div class="grid g3 mb"><div><div class="xs muted">Stok</div><b class="num" style="font-size:18px">${p.track_stock !== false ? numf(p.stock, 2) + ' ' + esc(p.unit || '') : '—'}</b></div><div><div class="xs muted">Harga beli</div><b class="num">${money(p.buy_price)}</b></div><div><div class="xs muted">Harga jual</div><b class="num c-in">${money(p.sell_price)}</b></div></div>
+  modal(esc(p.name), `<div class="grid g3 mb"><div><div class="xs muted">Stok</div><b class="num" style="font-size:18px">${p.track_stock !== false ? numf(stockOf(p), 2) + ' ' + esc(p.unit || '') : '—'}</b></div><div><div class="xs muted">Harga beli</div><b class="num">${money(p.buy_price)}</b></div><div><div class="xs muted">Harga jual</div><b class="num c-in">${money(p.sell_price)}</b></div></div>
     <div class="row wrap mb">${p.track_stock !== false ? `<button class="btn sm" onclick="stockIn('${id}')">${ic('download')} Stok Masuk</button><button class="btn sm" onclick="opname('${id}')">${ic('check')} Opname / Sesuaikan</button>` : ''}<button class="btn sm" onclick="productForm('${id}')">${ic('edit')} Edit</button><button class="btn sm danger" onclick="deleteProduct('${id}')">${ic('trash')} Hapus</button></div>
     <h4 style="margin:6px 0">Riwayat stok</h4>${moves.length ? `<div class="tbl-wrap"><table class="tbl"><tr><th>Tanggal</th><th>Jenis</th><th class="r">Jumlah</th><th>Catatan</th></tr>${moves.map(m => `<tr><td>${fmtDate(m.date)}</td><td>${{ in: '📥 Masuk', sale: '🛒 Terjual', adjust: '⚖️ Penyesuaian', out: '📤 Keluar' }[m.kind] || m.kind}</td><td class="r num ${N(m.qty) < 0 ? 'c-out' : 'c-in'}">${N(m.qty) > 0 ? '+' : ''}${numf(m.qty, 2)}</td><td class="xs muted">${esc(m.note || '')}</td></tr>`).join('')}</table></div>` : '<p class="muted small">Belum ada pergerakan stok.</p>'}`, { wide: true });
 }
@@ -43,7 +43,7 @@ function productForm(id) {
     <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${[...new Set([...listGet('groups'), ...groups])].map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
       <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${listGet('units').map(u => `<option value="${esc(u)}">`).join('')}</datalist></label></div>
     <div class="f-row"><label class="f"><span>Harga beli / modal</span>${moneyInput('buy_price', p.buy_price)}</label><label class="f"><span>Harga jual</span>${moneyInput('sell_price', p.sell_price)}</label></div>
-    <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${p.stock === '' ? '' : N(p.stock)}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
+    <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${id ? stockOf(p) : ''}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
     <label class="f"><span>Kode / SKU (opsional)</span><input class="inp" name="sku" value="${esc(p.sku || '')}"></label>
     <div class="set-row"><div class="t grow"><b>Lacak stok</b><small>Matikan untuk jasa / menu masakan</small></div><label class="switch"><input type="checkbox" name="track_stock" ${p.track_stock !== false ? 'checked' : ''}><i></i></label></div>
     <div class="set-row"><div class="t grow"><b>Aktif</b><small>Produk nonaktif tidak tampil di kasir</small></div><label class="switch"><input type="checkbox" name="active" ${p.active !== false ? 'checked' : ''}><i></i></label></div>
@@ -52,14 +52,14 @@ function productForm(id) {
     if (S.d.products.some(x => x.id !== id && x.name.trim().toLowerCase() === f.name.trim().toLowerCase())) return toast('Produk dengan nama ini sudah ada', true);
     if (N(f.min_stock) < 0 || (!id && N(f.stock) < 0)) return toast('Stok tidak boleh minus', true);
     const row = { name: f.name.trim(), group_name: f.group_name.trim() || null, unit: f.unit.trim() || 'pcs', buy_price: parseMoney(f.buy_price), sell_price: parseMoney(f.sell_price), min_stock: N(f.min_stock), sku: f.sku.trim() || null, track_stock: !!f.track_stock, active: !!f.active };
-    const ok = await safe(async () => { if (id) await upd('products', id, row); else { const np = await add('products', { ...row, stock: N(f.stock) }); if (N(f.stock)) await add('stock_moves', { product_id: np.id, date: today(), qty: N(f.stock), kind: 'adjust', note: 'Stok awal' }); } return true; }, 'Produk disimpan');
+    const ok = await safe(async () => { if (id) await upd('products', id, row); else { const np = await add('products', { ...row, stock: N(f.stock), stock_base: 0 }); if (N(f.stock)) await add('stock_moves', { product_id: np.id, date: today(), qty: N(f.stock), kind: 'adjust', note: 'Stok awal' }); } return true; }, 'Produk disimpan');
     if (ok) { closeModal(); render(); } } });
 }
 function deleteProduct(id) { const p = prod(id); confirmBox('Hapus produk <b>' + esc(p.name) + '</b>? Riwayat stoknya ikut terhapus (transaksi tetap ada). Tip: nonaktifkan saja jika masih ingin menyimpan datanya.', async () => { await safe(async () => { for (const m of S.d.stock_moves.filter(x => x.product_id === id)) S.d.stock_moves = S.d.stock_moves.filter(x => x.id !== m.id); if (S.mode === 'local') { const db = Local.db(); db.stock_moves = (db.stock_moves || []).filter(x => x.product_id !== id); Local.save(db); } await del('products', id); }, 'Produk dihapus'); render(); }); }
 function stockInPick() {
   const ps = S.d.products.filter(p => p.active !== false && p.track_stock !== false);
   if (!ps.length) return productForm();
-  modal('Pilih Produk', `<input class="inp mb" placeholder="Cari…" oninput="$$('#spl .li').forEach(x=>x.style.display=x.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"><div class="list" id="spl">${ps.map(p => `<div class="li" onclick="stockIn('${p.id}')"><div class="av">📦</div><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">Stok ${numf(p.stock, 2)} ${esc(p.unit || '')}</div></div></div>`).join('')}</div>
+  modal('Pilih Produk', `<input class="inp mb" placeholder="Cari…" oninput="$$('#spl .li').forEach(x=>x.style.display=x.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"><div class="list" id="spl">${ps.map(p => `<div class="li" onclick="stockIn('${p.id}')"><div class="av">📦</div><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">Stok ${numf(stockOf(p), 2)} ${esc(p.unit || '')}</div></div></div>`).join('')}</div>
     <button class="btn block mt" onclick="productForm()">${ic('plus')} Produk baru</button>`);
 }
 function stockIn(pid) {
@@ -88,8 +88,7 @@ async function saveStockIn(pid) {
     let txId = null; const items = [{ pid, name: p.name, qty, price, cost: price, unit: p.unit }];
     if (f.pay === 'credit') await add('debts', { kind: 'hutang', contact_id: f.contact_id || null, amount: total, paid: 0, date: f.date, due_date: f.due || null, category_id: f.cat, source: 'purchase', note: 'Pembelian ' + p.name + ' ' + qty + ' ' + (p.unit || '') });
     else if (f.pay !== 'none' && total > 0) txId = (await add('transactions', { date: f.date, type: 'out', amount: total, category_id: f.cat, account_id: f.pay, contact_id: f.contact_id || null, ref: 'purchase', items, note: f.note || ('Beli ' + p.name) })).id;
-    const patch = { stock: N(p.stock) + qty }; if (price && f.pay !== 'none') patch.buy_price = price;
-    await upd('products', pid, patch);
+    if (price && f.pay !== 'none' && price !== N(p.buy_price)) await upd('products', pid, { buy_price: price });
     await add('stock_moves', { product_id: pid, date: f.date, qty, kind: 'in', note: f.pay === 'none' ? (f.note || 'Hasil produksi') : (f.note || 'Pembelian'), transaction_id: txId });
     return true;
   }, 'Stok ' + p.name + ' bertambah ' + numf(qty, 2));
@@ -97,12 +96,12 @@ async function saveStockIn(pid) {
 }
 function opname(pid) {
   const p = prod(pid);
-  modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(p.stock, 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
-    <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${N(p.stock)}" autofocus></label>
+  modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(stockOf(p), 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
+    <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${stockOf(p)}" autofocus></label>
     <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
-      const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - N(p.stock); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
-      const ok = await safe(async () => { await upd('products', pid, { stock: real }); await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
+      const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - stockOf(p); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
+      const ok = await safe(async () => { await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
       if (ok) { closeModal(); render(); } } });
 }
 

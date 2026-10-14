@@ -127,7 +127,7 @@ async function bizDuplicate(id) {
         const copy = (rows, extra) => rows.map(r => { const o = { ...r, ...extra }; delete o.user_id; map[r.id] = o.id = uid(); o.business_id = saved.id; o.created_at = new Date().toISOString(); return o; });
         await B().insert('accounts', copy(data.accounts, { opening_balance: 0 }));
         await B().insert('categories', copy(data.categories, {}));
-        await B().insert('products', copy(data.products, { stock: 0 }));
+        await B().insert('products', copy(data.products, { stock: 0, stock_base: 0 }));
         await B().insert('contacts', copy(data.contacts, {}));
         await B().insert('budgets', copy(data.budgets, {}).map(b => ({ ...b, category_id: map[b.category_id] || null })).filter(b => b.category_id));
         closeModal(); await openBiz(saved); return true;

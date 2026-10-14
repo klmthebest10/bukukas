@@ -79,3 +79,4 @@ Aplikasi khusus Indonesia: semua nominal dalam **Rupiah**, zona waktu per usaha 
 - Perubahan saat offline masuk antrean (`src/7-sync.js`) dan dikirim otomatis saat online, berurutan & tanpa dobel (upsert by id).
 - Indikator di atas layar: ☁️ Tersinkron • ⏳ menunggu • 📴 Offline. Ketuk untuk detail & "Sinkronkan sekarang".
 - Fitur yang butuh internet: daftar/masuk pertama kali, pulihkan backup, kosongkan data, hapus usaha, notifikasi uji.
+- **Stok anti-tertimpa**: stok produk = `stock_base` + jumlah semua `stock_moves.qty` (migrasi `004_stock_base.sql`). Penjualan/stok masuk dari beberapa HP — termasuk yang offline — hanya menambah baris riwayat, jadi semuanya terhitung saat sinkron. Saran: lakukan **stok opname** dari satu perangkat saja dan saat semua perangkat sudah tersinkron.

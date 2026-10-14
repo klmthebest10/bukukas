@@ -129,7 +129,7 @@ function insights(r, T, P) {
   if (P.profit && T.profit !== P.profit) { const up = T.profit > P.profit; out.push([up ? '📈' : '📉', `Laba ${up ? 'naik' : 'turun'} <b>${money(Math.abs(T.profit - P.profit))}</b> dibanding periode sebelumnya.`]); }
   if (T.profit < 0) out.push(['⚠️', 'Pengeluaran lebih besar dari pemasukan. Tinjau biaya terbesar Anda.']);
   const pi = sum(openDebts('piutang'), debtLeft); if (pi) out.push(['📥', `Uang di pelanggan (piutang) belum tertagih: <b>${money(pi)}</b>.`]);
-  const low = S.d.products.filter(p => p.track_stock !== false && N(p.min_stock) > 0 && N(p.stock) <= N(p.min_stock)).length; if (low) out.push(['📦', `<b>${low} produk</b> stoknya menipis — segera belanja ulang.`]);
+  const low = S.d.products.filter(p => p.track_stock !== false && N(p.min_stock) > 0 && stockOf(p) <= N(p.min_stock)).length; if (low) out.push(['📦', `<b>${low} produk</b> stoknya menipis — segera belanja ulang.`]);
   return out.slice(0, 6);
 }
 function prodSummaryCard(r) {
@@ -266,7 +266,6 @@ function deleteTx(id) {
   confirmBox('Hapus transaksi <b>' + esc(txTitle(t)) + '</b> sebesar <b>' + money(t.amount) + '</b>?' + note, async () => {
     await safe(async () => {
       if ((t.ref === 'sale' || t.ref === 'purchase') && t.items) {
-        for (const it of t.items) { const p = prod(it.pid); if (p && p.track_stock !== false) await upd('products', p.id, { stock: N(p.stock) + (t.ref === 'sale' ? 1 : -1) * N(it.qty) }); }
         for (const mv of S.d.stock_moves.filter(x => x.transaction_id === t.id)) await del('stock_moves', mv.id);
       }
       if (t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) - N(t.amount)) }); }
@@ -298,8 +297,8 @@ function renderPGrid() {
   const q = S.kasir.q.trim().toLowerCase();
   const ps = S.d.products.filter(p => p.active !== false && (!S.kasir.grp || p.group_name === S.kasir.grp) && (!q || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
   const g = $('#pgrid'); if (!g) return;
-  g.innerHTML = ps.length ? ps.map(p => { const inCart = S.cart.find(c => c.pid === p.id); const low = p.track_stock !== false && N(p.stock) <= N(p.min_stock);
-    return `<div class="pcard ${low ? 'low' : ''}" role="button" tabindex="0" onclick="cartAdd('${p.id}')" onkeydown="if(event.key==='Enter')cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? (N(p.stock) <= 0 ? 'Stok habis' : 'Stok ' + numf(p.stock, 2) + ' ' + esc(p.unit || '')) : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
+  g.innerHTML = ps.length ? ps.map(p => { const inCart = S.cart.find(c => c.pid === p.id); const low = p.track_stock !== false && stockOf(p) <= N(p.min_stock);
+    return `<div class="pcard ${low ? 'low' : ''}" role="button" tabindex="0" onclick="cartAdd('${p.id}')" onkeydown="if(event.key==='Enter')cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? (stockOf(p) <= 0 ? 'Stok habis' : 'Stok ' + numf(stockOf(p), 2) + ' ' + esc(p.unit || '')) : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
     : `<div class="empty" style="grid-column:1/-1"><div class="e">📦</div><p>${S.d.products.length ? 'Produk tidak ditemukan.' : 'Belum ada produk.'}</p><button class="btn primary sm" onclick="productForm()">${ic('plus')} Tambah Produk</button></div>`;
 }
 const cartTotal = () => sum(S.cart, c => N(c.qty) * N(c.price));
@@ -308,7 +307,7 @@ function cartAdd(pid) {
   const p = prod(pid); if (!p) return; const c = S.cart.find(x => x.pid === pid);
   if (c) c.qty = N(c.qty) + 1; else S.cart.push({ pid, name: p.name, price: N(p.sell_price), cost: N(p.buy_price), qty: 1, unit: p.unit });
   const q = (c || S.cart[S.cart.length - 1]).qty;
-  if (p.track_stock !== false && q > N(p.stock)) toast('⚠️ Stok ' + p.name + ' tidak mencukupi (sisa ' + numf(p.stock, 2) + ')', true);
+  if (p.track_stock !== false && q > stockOf(p)) toast('⚠️ Stok ' + p.name + ' tidak mencukupi (sisa ' + numf(stockOf(p), 2) + ')', true);
   if (navigator.vibrate) navigator.vibrate(12);
   cartChanged();
 }
@@ -402,7 +401,7 @@ async function doCheckout() {
       const d = await add('debts', { kind: 'piutang', contact_id: cid, amount: total, paid: dp, date, due_date: f.due || null, category_id: f.cat, source: 'sale', note: ('Penjualan: ' + items.map(i => i.name + ' x' + i.qty).join(', ')).slice(0, 280) + (discNote ? ' • ' + discNote : '') });
       if (dp) await add('transactions', { date, type: 'in', amount: dp, account_id: f.dp_acc, contact_id: cid, ref: 'debt', debt_id: d.id, category_id: f.cat, note: 'Uang muka penjualan' });
     } else await add('transactions', { id: txId, date, type: 'in', amount: total, category_id: f.cat, account_id: method, contact_id: cid, ref: 'sale', items, cost, note: [f.note.trim(), discNote].filter(Boolean).join(' • ') });
-    for (const it of items) { const p = prod(it.pid); if (!p || p.track_stock === false) continue; await upd('products', p.id, { stock: N(p.stock) - it.qty }); await add('stock_moves', { product_id: p.id, date, qty: -it.qty, kind: 'sale', note: credit ? 'Penjualan (piutang)' : 'Penjualan', transaction_id: credit ? null : txId }); }
+    for (const it of items) { const p = prod(it.pid); if (!p || p.track_stock === false) continue; await add('stock_moves', { product_id: p.id, date, qty: -it.qty, kind: 'sale', note: credit ? 'Penjualan (piutang)' : 'Penjualan', transaction_id: credit ? null : txId }); }
     if (f.cat !== S.biz.settings.sale_cat) { S.biz.settings.sale_cat = f.cat; updBiz({ settings: S.biz.settings }).catch(() => {}); }
     return { cid };
   });

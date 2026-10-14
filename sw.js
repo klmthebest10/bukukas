@@ -1,5 +1,5 @@
 /* BukuKas Pro — Service Worker (offline cache + notifikasi) */
-const VERSION = 'bukukas-v1.5.0';
+const VERSION = 'bukukas-v1.6.0';
 const SHELL = ['./', './index.html', './app.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 /* pustaka dari CDN ikut disimpan sejak awal agar aplikasi bisa dibuka offline */
 const CDN = ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2', 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js', 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'];

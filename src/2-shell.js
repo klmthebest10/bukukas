@@ -118,9 +118,18 @@ async function openBiz(b) {
   S.biz = normalizeBiz(b); APP_TZ = S.biz.settings.tz || 'Asia/Jakarta'; LS.set('bk_biz', b.id); S.cart = []; screen('<div class="loader"></div>');
   try { S.d = await B().load(b.id); } catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data usaha.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><button class="btn primary block" onclick="openBiz(S.businesses.find(x=>x.id==='${b.id}')||S.biz)">Coba lagi</button></div>`); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
+  await migrateStock();
   shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
   if (S.mode === 'cloud') { Sync.ui(); if (S.offline) toast('📴 Mode offline — data dari perangkat ini. Perubahan dikirim otomatis saat online.'); else setTimeout(() => Sync.flush(), 1200); }
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
+}
+
+/* sekali jalan: produk lama tanpa stock_base → hitung dari stok tercatat dikurangi riwayat */
+async function migrateStock() {
+  invalidateStock();
+  const legacy = S.d.products.filter(p => p.stock_base == null); if (!legacy.length) return;
+  for (const p of legacy) { const base = N(p.stock) - movesSum(p.id); try { await B().update('products', p.id, { stock_base: base }); } catch (e) { /* dicoba lagi lain kali */ } p.stock_base = base; }
+  invalidateStock(); Snap.save();
 }
 
 /* ---------------- wizard usaha baru ---------------- */
@@ -155,7 +164,7 @@ async function seedBiz(T, cash, sample) {
   const accs = await addMany('accounts', [{ name: 'Kas Tunai', type: 'kas', opening_balance: cash, color: '#0d9488' }, { name: 'Rekening Bank', type: 'bank', opening_balance: 0, color: '#4f46e5' }, { name: 'E-Wallet / QRIS', type: 'ewallet', opening_balance: 0, color: '#d97706' }]);
   let i = 0;
   const cs = await addMany('categories', [...T.inc.map(([n, e]) => ({ name: n, type: 'in', icon: e, color: PALETTE[i++ % 12] })), ...T.out.map(([n, e]) => ({ name: n, type: 'out', icon: e, color: PALETTE[i++ % 12] }))]);
-  const prods = await addMany('products', T.products.map(p => ({ name: p[0], unit: p[1], buy_price: p[2], sell_price: p[3], stock: sample ? p[4] : 0, min_stock: p[5], track_stock: p[6] !== false, active: true })));
+  const prods = await addMany('products', T.products.map(p => ({ name: p[0], unit: p[1], buy_price: p[2], sell_price: p[3], stock: sample ? p[4] : 0, stock_base: sample ? p[4] : 0, min_stock: p[5], track_stock: p[6] !== false, active: true })));
   if (!sample) return;
   const R = (a, b) => a + Math.random() * (b - a), RI = (a, b) => Math.round(R(a, b));
   const inC = cs.filter(c => c.type === 'in'), outC = cs.filter(c => c.type === 'out');
@@ -232,6 +241,7 @@ const PAGES = {};
 function go(p) { if (!navAllowed(p)) p = 'dashboard'; S.page = p; closeOverlays(); closeModal(); render(); window.scrollTo({ top: 0 }); try { history.replaceState(null, '', location.pathname + (p !== 'dashboard' ? '?page=' + p : '')); } catch (e) {} }
 function render() {
   if (!S.biz || !$('#content')) return;
+  invalidateStock();
   S.charts.forEach(c => { try { c.destroy(); } catch (e) {} }); S.charts = [];
   $$('[data-nav]').forEach(b => b.classList.toggle('on', b.dataset.nav === S.page));
   const pg = PAGES[S.page] || PAGES.dashboard; const n = NAV.find(x => x.id === S.page);
@@ -243,7 +253,7 @@ function render() {
   updateBell(); cacheBizSummary(); Sync.ui();
 }
 function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam') + ' 👋 ' + fmtDay(today()); }
-let _dc; function dataChanged() { Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
+let _dc; function dataChanged() { invalidateStock(); Snap.save(); clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
   modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
@@ -270,8 +280,8 @@ function computeAlerts() {
   if (!S.biz) return [];
   const ns = notifSet(), m = mods(), A = [], now = nowTZ(), t = now.date;
   const [hh, mm] = (ns.jam || '19:00').split(':').map(Number); const pastJam = now.h * 60 + now.m >= hh * 60 + (mm || 0);
-  if (ns.stok && m.stok) S.d.products.filter(p => p.active !== false && p.track_stock !== false && N(p.min_stock) > 0 && N(p.stock) <= N(p.min_stock)).forEach(p =>
-    A.push({ id: 'stok-' + p.id + '-' + N(p.stock), lv: N(p.stock) <= 0 ? 'danger' : 'warn', e: '📦', t: (N(p.stock) <= 0 ? 'Stok habis: ' : 'Stok menipis: ') + p.name, b: 'Sisa ' + numf(p.stock, 2) + ' ' + (p.unit || '') + ' (minimum ' + numf(p.min_stock) + ')', page: 'stok' }));
+  if (ns.stok && m.stok) S.d.products.filter(p => p.active !== false && p.track_stock !== false && N(p.min_stock) > 0 && stockOf(p) <= N(p.min_stock)).forEach(p =>
+    A.push({ id: 'stok-' + p.id + '-' + stockOf(p), lv: stockOf(p) <= 0 ? 'danger' : 'warn', e: '📦', t: (stockOf(p) <= 0 ? 'Stok habis: ' : 'Stok menipis: ') + p.name, b: 'Sisa ' + numf(stockOf(p), 2) + ' ' + (p.unit || '') + ' (minimum ' + numf(p.min_stock) + ')', page: 'stok' }));
   const H = N(ns.hari_jatuh_tempo) || 3;
   ['piutang', 'hutang'].forEach(k => { if (!ns[k] || !m.hutang) return; openDebts(k).filter(d => d.due_date && d.due_date <= addDays(t, H)).forEach(d => {
     const late = d.due_date < t, dd = diffDays(t, d.due_date);
