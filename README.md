@@ -62,7 +62,7 @@ Tanpa Supabase pun aplikasi bisa dipakai (**Pakai Mode Lokal**). Data tersimpan 
 ## Mengubah kode
 Edit file di folder `src/`, lalu gabungkan kembali:
 ```bash
-cat src/1-core.js src/2-shell.js src/3-pages-a.js src/4-pages-b.js src/5-pages-c.js > app.js
+cat src/*.js > app.js
 ```
 Setelah update, naikkan `VERSION` di `sw.js` (misal `bukukas-v1.0.1`) agar perangkat pengguna mengambil versi terbaru.
 

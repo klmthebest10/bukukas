@@ -4,7 +4,8 @@
 function mkChart(id, cfg) {
   const el = document.getElementById(id); if (!el) return;
   if (!window.Chart) { el.parentElement.innerHTML = '<div class="empty small">Grafik memerlukan koneksi internet saat pertama dibuka.</div>'; return; }
-  Chart.defaults.font.family = '"Plus Jakarta Sans", system-ui, sans-serif'; Chart.defaults.color = cssVar('--muted'); Chart.defaults.borderColor = cssVar('--line');
+  Chart.defaults.font.family = '"Plus Jakarta Sans", system-ui, sans-serif'; Chart.defaults.font.size = 12.5; Chart.defaults.color = cssVar('--text-2'); Chart.defaults.borderColor = cssVar('--line');
+  const tt = Chart.defaults.plugins.tooltip; if (tt) { tt.backgroundColor = 'rgba(10,17,32,.92)'; tt.titleColor = '#fff'; tt.bodyColor = '#e5ecf7'; tt.padding = 12; tt.cornerRadius = 12; tt.titleFont = { weight: '700', size: 13 }; tt.bodyFont = { size: 13 }; tt.boxPadding = 6; tt.usePointStyle = true; }
   const c = new Chart(el, cfg); S.charts.push(c); return c;
 }
 const moneyTip = { callbacks: { label: c => ' ' + c.dataset.label + ': ' + money(c.parsed.y ?? c.parsed) } };
@@ -20,17 +21,19 @@ function buckets(r, filterFn = isPL) {
 function flowChart(id, r) {
   const b = buckets(r);
   mkChart(id, { type: 'bar', data: { labels: b.labels, datasets: [
-    { label: 'Pemasukan', data: b.inc, backgroundColor: cssVar('--in'), borderRadius: 6, maxBarThickness: 18 },
-    { label: 'Pengeluaran', data: b.out, backgroundColor: cssVar('--out'), borderRadius: 6, maxBarThickness: 18 },
-    { label: 'Laba', type: 'line', data: b.inc.map((v, i) => v - b.out[i]), borderColor: cssVar('--info'), backgroundColor: cssVar('--info'), tension: .35, pointRadius: 0, borderWidth: 2 }] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: moneyTip },
-      scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { ticks: { callback: v => short(v) } } } } });
+    { label: 'Pemasukan', data: b.inc, backgroundColor: cssVar('--c-in'), borderRadius: 7, maxBarThickness: 22, order: 2 },
+    { label: 'Pengeluaran', data: b.out, backgroundColor: cssVar('--c-out'), borderRadius: 7, maxBarThickness: 22, order: 2 },
+    { label: 'Laba bersih', type: 'line', data: b.inc.map((v, i) => v - b.out[i]), borderColor: cssVar('--c-line'), backgroundColor: cssVar('--c-line'), tension: .35, pointRadius: b.labels.length > 31 ? 0 : 3, pointHoverRadius: 6, borderWidth: 2.5, order: 1 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10, padding: 16, font: { weight: '600' } } }, tooltip: moneyTip },
+      scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { border: { display: false }, grid: { color: cssVar('--line') }, ticks: { callback: v => short(v), maxTicksLimit: 6 } } } } });
 }
 function donut(id, type, r) {
   const m = {}; S.d.transactions.forEach(t => { if (t.type === type && isPL(t) && inR(t.date, r.from, r.to)) m[t.category_id] = (m[t.category_id] || 0) + N(t.amount); });
   const rows = Object.entries(m).sort((a, b) => b[1] - a[1]); if (!rows.length) return false;
-  mkChart(id, { type: 'doughnut', data: { labels: rows.map(x => (cat(x[0]) || {}).name || '-'), datasets: [{ data: rows.map(x => x[1]), backgroundColor: rows.map((x, i) => (cat(x[0]) || {}).color || PALETTE[i % 12]), borderWidth: 2, borderColor: cssVar('--surface') }] },
-    options: { maintainAspectRatio: false, cutout: '68%', plugins: { legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 8, font: { size: 12 } } }, tooltip: { callbacks: { label: c => ' ' + c.label + ': ' + money(c.parsed) } } } } });
+  const total = sum(rows, x => x[1]); const top = rows.slice(0, 6); if (rows.length > 6) top.push(['_other', sum(rows.slice(6), x => x[1])]);
+  const center = { id: 'center', afterDraw(ch) { const { ctx, chartArea: a } = ch; if (!a) return; const x = (a.left + a.right) / 2, y = (a.top + a.bottom) / 2; ctx.save(); ctx.textAlign = 'center'; ctx.fillStyle = cssVar('--muted'); ctx.font = '600 11px "Plus Jakarta Sans",sans-serif'; ctx.fillText('Total', x, y - 9); ctx.fillStyle = cssVar('--text'); ctx.font = '800 15px "Plus Jakarta Sans",sans-serif'; ctx.fillText(document.body.classList.contains('privacy') ? '•••' : 'Rp ' + short(total), x, y + 10); ctx.restore(); } };
+  mkChart(id, { type: 'doughnut', plugins: [center], data: { labels: top.map(x => x[0] === '_other' ? 'Lainnya' : ((cat(x[0]) || {}).name || '-')), datasets: [{ data: top.map(x => x[1]), backgroundColor: top.map((x, i) => x[0] === '_other' ? '#94a3b8' : ((cat(x[0]) || {}).color || PALETTE[i % 12])), borderWidth: 3, borderColor: cssVar('--surface'), hoverOffset: 8 }] },
+    options: { maintainAspectRatio: false, cutout: '66%', plugins: { legend: { position: window.innerWidth < 640 ? 'bottom' : 'right', labels: { usePointStyle: true, boxWidth: 10, padding: 12, font: { size: 12.5, weight: '600' }, generateLabels: ch => ch.data.labels.map((l, i) => ({ text: l + '  ' + Math.round(ch.data.datasets[0].data[i] / total * 100) + '%', fillStyle: ch.data.datasets[0].backgroundColor[i], strokeStyle: 'transparent', pointStyle: 'circle', index: i, fontColor: cssVar('--text-2') })) } }, tooltip: { callbacks: { label: c => ' ' + c.label + ': ' + money(c.parsed) + ' (' + Math.round(c.parsed / total * 100) + '%)' } } } } });
   return true;
 }
 function trendHTML(cur, prev, invert) {

@@ -94,61 +94,17 @@ function ctList() {
 function contactForm(id) {
   const c = id ? contact(id) : { name: '', type: S.ct.type === 'all' ? 'pelanggan' : S.ct.type, phone: '', address: '', note: '' };
   modal(id ? 'Edit Kontak' : 'Kontak Baru', `<form id="cf"><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label>
-    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${['pelanggan', 'supplier', 'lainnya'].map(t => `<option ${c.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
+    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[...new Set([...listGet('ctypes'), c.type].filter(Boolean))].map(t => `<option ${c.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
     <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>`,
     { foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
       onMount: m => m.querySelector('#cfs').onclick = async () => { const f = formObj($('#cf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), type: f.type, phone: f.phone.trim(), address: f.address.trim(), note: f.note.trim() };
         const ok = await safe(async () => { if (id) await upd('contacts', id, row); else await add('contacts', row); return true; }, 'Kontak disimpan'); if (ok) { closeModal(); render(); } } });
 }
 
-/* ---------------- PENGATURAN ---------------- */
-PAGES.pengaturan = {
-  html() {
-    const b = S.biz, st = b.settings, m = mods(), ns = notifSet(), th = LS.get('bk_theme', 'auto');
-    const perm = 'Notification' in window ? Notification.permission : 'unsupported';
-    const sw = (name, on, fn) => `<label class="switch"><input type="checkbox" ${on ? 'checked' : ''} onchange="${fn}('${name}',this.checked)"><i></i></label>`;
-    return `<div class="grid g2" style="align-items:start">
-    <div class="grid" style="align-content:start">
-      <div class="card"><div class="card-h"><h3>🏪 Profil Usaha</h3></div><form id="bizF">
-        <div class="f-row" style="grid-template-columns:80px 1fr"><label class="f"><span>Ikon</span><input class="inp" name="emoji" value="${esc(st.emoji || '')}" maxlength="4" style="text-align:center;font-size:20px"></label><label class="f"><span>Nama usaha</span><input class="inp" name="name" value="${esc(b.name)}" required></label></div>
-        <div class="f-row"><label class="f"><span>Jenis usaha</span><select class="inp" name="type">${Object.entries(TEMPLATES).map(([k, t]) => `<option value="${k}" ${b.type === k ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}</select></label><label class="f"><span>Zona waktu</span><select class="inp" name="tz">${Object.entries(TIMEZONES).map(([k, v]) => `<option value="${k}" ${(st.tz || 'Asia/Jakarta') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>
-        <div class="f-row"><label class="f"><span>No HP usaha</span><input class="inp" name="phone" value="${esc(b.phone || '')}"></label><label class="f"><span>Target omzet / bulan</span>${moneyInput('target', st.target)}</label></div>
-        <label class="f"><span>Alamat (tampil di struk)</span><input class="inp" name="address" value="${esc(b.address || '')}"></label>
-        <button type="button" class="btn primary" onclick="saveBiz()">Simpan Profil</button></form></div>
-
-      <div class="card"><div class="card-h"><h3>🧩 Fitur yang Ditampilkan</h3></div>${Object.entries(MODULES).map(([k, [l, d]]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, m[k], 'setMod')}</div>`).join('')}</div>
-
-      <div class="card" id="set-notif"><div class="card-h"><h3>🔔 Notifikasi & Pengingat</h3></div>
-        <div class="set-row"><div class="t grow"><b>Notifikasi perangkat (pop-up HP/PC)</b><small>${perm === 'granted' ? 'Izin diberikan ✅' : perm === 'denied' ? 'Diblokir — buka pengaturan browser/HP untuk mengizinkan' : perm === 'unsupported' ? 'Tidak didukung browser ini — install aplikasi dulu' : 'Belum diizinkan'}</small></div>${ns.push && perm === 'granted' ? sw('push', true, 'setNotif') : `<button class="btn sm primary" onclick="enablePush()">Aktifkan</button>`}</div>
-        <p class="xs muted" style="margin:10px 0 2px">Pilih pemberitahuan yang ingin ditampilkan:</p>
-        ${[['stok', 'Stok menipis / habis', 'Saat stok ≤ batas minimum produk'], ['piutang', 'Piutang jatuh tempo', 'Tagihan pelanggan mendekati / lewat tempo'], ['hutang', 'Hutang jatuh tempo', 'Kewajiban bayar mendekati / lewat tempo'], ['anggaran', 'Anggaran hampir habis', 'Pengeluaran kategori ≥ 80% batas'], ['target', 'Target omzet tercapai', 'Kabar gembira saat target bulanan tercapai'], ['catat', 'Pengingat catat transaksi', 'Jika belum ada transaksi hari ini'], ['harian', 'Pengingat catatan harian', 'Jika data produksi hari ini belum diisi'], ['ringkasan', 'Ringkasan harian', 'Total masuk & keluar setiap hari']].map(([k, l, d]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, ns[k], 'setNotif')}</div>`).join('')}
-        <div class="f-row mt"><label class="f"><span>Jam pengingat harian</span><input class="inp" type="time" value="${ns.jam}" onchange="setNotif('jam',this.value)"></label><label class="f"><span>Ingatkan jatuh tempo (hari sebelum)</span><input class="inp" type="number" min="0" max="30" value="${ns.hari_jatuh_tempo}" onchange="setNotif('hari_jatuh_tempo',Number(this.value))"></label></div>
-        <button class="btn sm" onclick="testNotif()">🔔 Kirim notifikasi uji</button>
-        <p class="xs muted">${serverPush() ? '☁️ Push server aktif: pengingat dikirim dari server setiap 15 menit dan tetap muncul walau aplikasi ditutup.' : S.mode === 'cloud' ? 'Setelah diaktifkan, pengingat dikirim dari server dan tetap muncul walau aplikasi ditutup.' : 'Mode lokal: notifikasi diperiksa saat aplikasi dibuka & setiap 5 menit selama aplikasi berjalan.'}</p></div>
-    </div>
-    <div class="grid" style="align-content:start">
-      <div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><button class="btn sm" onclick="accountForm()">${ic('plus')}</button></div>
-        <div class="list">${S.d.accounts.map(a => `<div class="li" onclick="accountForm('${a.id}')"><div class="av" style="background:${a.color || '#0d9488'}22">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'}</div><div class="grow"><div class="t">${esc(a.name)}</div><div class="s">Saldo awal ${money(a.opening_balance)}</div></div><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div></div>
-
-      <div class="card"><div class="card-h"><h3>🏷️ Kategori</h3><button class="btn sm" onclick="catForm()">${ic('plus')}</button></div>
-        ${['in', 'out'].map(t => `<p class="xs muted" style="margin:8px 0 6px;font-weight:700">${t === 'in' ? 'PEMASUKAN' : 'PENGELUARAN'}</p><div class="row wrap gap-s">${cats(t).map(c => `<button class="chip" onclick="catForm('${c.id}')" style="border-color:${c.color || 'var(--line)'}">${esc(c.icon || '')} ${esc(c.name)}</button>`).join('')}</div>`).join('')}</div>
-
-      <div class="card"><div class="card-h"><h3>📋 Kolom Catatan Harian</h3><button class="btn sm" onclick="metricForm()">${ic('plus')}</button></div>
-        ${metrics().length ? `<div class="list">${metrics().map((x, i) => `<div class="li" onclick="metricForm(${i})"><div class="av">📈</div><div class="grow"><div class="t">${esc(x.label)}</div><div class="s">Satuan: ${esc(x.unit)} • ${x.agg === 'last' ? 'nilai terakhir' : x.agg === 'avg' ? 'rata-rata' : 'dijumlahkan'}</div></div></div>`).join('')}</div>` : '<p class="muted small">Belum ada. Contoh: produksi telur, pakan, panen, porsi terjual.</p>'}</div>
-
-      <div class="card"><div class="card-h"><h3>🎨 Tampilan</h3></div><div class="seg">${[['auto', '🌗 Otomatis'], ['light', '☀️ Terang'], ['dark', '🌙 Gelap']].map(([k, l]) => `<button class="${th === k ? 'on' : ''}" onclick="setTheme('${k}')">${l}</button>`).join('')}</div>
-        <button class="btn block install-btn ${isStandalone() ? 'hidden' : ''}" onclick="installApp()">${ic('install')} Install aplikasi ke perangkat ini</button></div>
-
-      <div class="card"><div class="card-h"><h3>🗄️ Data & Akun</h3></div>
-        <div class="set-row"><div class="t grow"><b>${S.mode === 'cloud' ? '☁️ Tersimpan di Supabase' : '📱 Mode Lokal'}</b><small>${S.mode === 'cloud' ? esc(S.user && S.user.email) : 'Data hanya ada di perangkat ini. Rutin backup ya!'}</small></div>${S.mode === 'local' ? `<button class="btn sm" onclick="LS.del('bk_mode');location.reload()">Hubungkan Cloud</button>` : ''}</div>
-        <div class="row wrap mt"><button class="btn sm" onclick="backup()">${ic('download')} Backup (JSON)</button><label class="btn sm">${ic('upload')} Pulihkan<input type="file" accept=".json,application/json" hidden onchange="restore(this.files[0])"></label><button class="btn sm" onclick="exportCSV(S.d.transactions.slice().sort(sortTx),'semua-transaksi')">${ic('download')} Semua transaksi (CSV)</button></div>
-        <div class="row wrap mt"><button class="btn sm danger" onclick="clearData()">Kosongkan data transaksi</button><button class="btn sm danger" onclick="deleteBiz()">Hapus usaha ini</button><button class="btn sm" onclick="logout()">${ic('logout')} Keluar</button></div></div>
-    </div></div>`;
-  }
-};
+/* ---------------- PENGATURAN: lihat 6-extras.js ---------------- */
 async function saveBiz() {
   const f = formObj($('#bizF')); if (!f.name.trim()) return toast('Nama wajib diisi', true);
-  const st = S.biz.settings; st.emoji = f.emoji.trim() || (TEMPLATES[f.type] || TEMPLATES.umum).emoji; st.target = parseMoney(f.target); st.tz = f.tz || 'Asia/Jakarta'; APP_TZ = st.tz;
+  const st = S.biz.settings; st.emoji = f.emoji.trim() || (TEMPLATES[f.type] || TEMPLATES.umum).emoji; st.typeLabel = (f.type_label || '').trim(); st.target = parseMoney(f.target); st.tz = f.tz || 'Asia/Jakarta'; APP_TZ = st.tz;
   const typeChanged = f.type !== S.biz.type;
   if (serverPush()) subscribePush(true);
   const ok = await safe(() => updBiz({ name: f.name.trim(), type: f.type, currency: 'IDR', phone: f.phone.trim(), address: f.address.trim(), settings: st }), 'Profil usaha disimpan');
@@ -186,13 +142,14 @@ function accountForm(id) {
         const ok = await safe(async () => { if (id) await upd('accounts', id, row); else await add('accounts', row); return true; }, 'Akun disimpan'); if (ok) { closeModal(); render(); } } });
 }
 function deleteAccount(id) { if (S.d.transactions.some(t => t.account_id === id || t.to_account_id === id)) return toast('Akun sudah punya transaksi, tidak bisa dihapus', true); if (S.d.accounts.length <= 1) return toast('Minimal harus ada 1 akun', true); confirmBox('Hapus akun ini?', async () => { await safe(() => del('accounts', id), 'Akun dihapus'); render(); }); }
-function catForm(id) {
-  const c = id ? cat(id) : { name: '', type: 'out', icon: '🧾', color: PALETTE[S.d.categories.length % 12] };
+function catForm(id, type) {
+  const c = id ? cat(id) : { name: '', type: type || 'out', icon: '🧾', color: PALETTE[S.d.categories.length % 12] };
   modal(id ? 'Edit Kategori' : 'Kategori Baru', `<form id="kf"><div class="f-row" style="grid-template-columns:80px 1fr"><label class="f"><span>Ikon</span><input class="inp" name="icon" value="${esc(c.icon || '')}" maxlength="4" style="text-align:center;font-size:20px"></label><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label></div>
-    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type" ${id ? 'disabled' : ''}><option value="in" ${c.type === 'in' ? 'selected' : ''}>Pemasukan</option><option value="out" ${c.type === 'out' ? 'selected' : ''}>Pengeluaran</option></select></label><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${c.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
+    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type"><option value="in" ${c.type === 'in' ? 'selected' : ''}>Pemasukan</option><option value="out" ${c.type === 'out' ? 'selected' : ''}>Pengeluaran</option></select></label><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${c.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
     <p class="xs muted">Ide ikon: 💰 🛒 📦 🥚 🌽 💊 🐔 🍊 🚚 💡 🏠 👷 🧾 📣 🔧 🎁</p></form>`,
     { foot: `${id ? `<button class="btn danger" onclick="deleteCat('${id}')">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="kfs">Simpan</button>`,
-      onMount: m => m.querySelector('#kfs').onclick = async () => { const f = formObj($('#kf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), icon: f.icon.trim(), color: f.color }; if (!id) row.type = f.type;
+      onMount: m => m.querySelector('#kfs').onclick = async () => { const f = formObj($('#kf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), icon: f.icon.trim(), color: f.color, type: f.type };
+        if (id && f.type !== c.type && S.d.transactions.some(t => t.category_id === id)) return toast('Jenis tidak bisa diubah: kategori ini sudah dipakai transaksi', true);
         const ok = await safe(async () => { if (id) await upd('categories', id, row); else await add('categories', row); return true; }, 'Kategori disimpan'); if (ok) { closeModal(); render(); } } });
 }
 function deleteCat(id) {
@@ -241,13 +198,12 @@ function clearData() {
     }, 'Data dikosongkan'); render();
   }, 'Ya, kosongkan');
 }
-function deleteBiz() {
-  modal('Hapus Usaha', `<p>Ketik <b>${esc(S.biz.name)}</b> untuk menghapus usaha ini beserta <b>seluruh</b> datanya secara permanen.</p><input class="inp" id="delName" autocomplete="off">`,
-    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn danger" id="delGo">Hapus Permanen</button>`, onMount: m => m.querySelector('#delGo').onclick = async () => {
-      if ($('#delName').value.trim() !== S.biz.name) return toast('Nama tidak cocok', true);
-      const ok = await safe(() => B().removeBiz(S.biz.id).then(() => true)); if (!ok) return;
-      LS.del('bk_biz'); location.reload(); } });
+function deleteBiz(id) {
+  const b = S.businesses.find(x => x.id === (id || S.biz.id)); if (!b) return;
+  modal('Hapus Usaha', `<div class="alert-item lv-danger" style="cursor:default"><div class="ai">⚠️</div><div><b>Tindakan permanen</b><small>Seluruh transaksi, stok, hutang/piutang & laporan usaha ini akan terhapus dan tidak bisa dikembalikan. Sebaiknya Backup dulu.</small></div></div><p>Ketik <b>${esc(b.name)}</b> untuk konfirmasi:</p><input class="inp" id="delName" autocomplete="off">`,
+    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn danger solid" id="delGo">${ic('trash')} Hapus Permanen</button>`, onMount: m => m.querySelector('#delGo').onclick = async () => {
+      if ($('#delName').value.trim() !== b.name) return toast('Nama tidak cocok', true);
+      const ok = await safe(() => B().removeBiz(b.id).then(() => true)); if (!ok) return;
+      LS.del('bk_sum_' + b.id); S.businesses = S.businesses.filter(x => x.id !== b.id); closeModal(); toast('Usaha "' + b.name + '" dihapus');
+      if (b.id === S.biz.id) { LS.del('bk_biz'); if (S.businesses.length) openBiz(S.businesses[0]); else showWizard(); } else render(); } });
 }
-
-/* jalankan */
-boot();

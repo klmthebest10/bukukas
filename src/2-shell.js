@@ -50,6 +50,7 @@ function showAuth(tab = 'login', msg = '') {
       <button class="btn primary block" id="authBtn">${tab === 'reg' ? 'Buat Akun' : 'Masuk'}</button>
     </form>
     ${tab === 'login' ? `<button class="btn ghost block mt small" onclick="forgotPass()">Lupa kata sandi?</button>` : ''}
+    <div class="secure-note">${ic('shield')}<span>Koneksi terenkripsi (HTTPS). Data usaha Anda hanya bisa diakses oleh akun Anda.</span></div>
     <div class="row between mt"><button class="btn ghost sm" onclick="useLocal()">Mode Lokal</button>${!cfg.fixed ? `<button class="btn ghost sm" onclick="LS.del('bk_cfg');location.reload()">Ganti database</button>` : ''}</div></div>`);
 }
 async function doAuth(e, tab) {
@@ -73,9 +74,10 @@ async function forgotPass() {
   const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
   toast(error ? error.message : 'Link reset kata sandi dikirim ke email', !!error);
 }
-async function logout() {
-  confirmBox('Keluar dari akun ini?', async () => {
-    if (S.mode === 'cloud') await S.sb.auth.signOut(); else LS.del('bk_mode');
+async function logout(all) {
+  confirmBox(all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?', async () => {
+    LS.del('bk_pin');
+    if (S.mode === 'cloud') await S.sb.auth.signOut(all ? { scope: 'global' } : undefined); else LS.del('bk_mode');
     location.reload();
   }, 'Keluar');
 }
@@ -91,7 +93,7 @@ async function openBiz(b) {
   S.biz = normalizeBiz(b); APP_TZ = S.biz.settings.tz || 'Asia/Jakarta'; LS.set('bk_biz', b.id); S.cart = []; screen('<div class="loader"></div>');
   try { S.d = await B().load(b.id); } catch (e) { toast('Gagal memuat: ' + e.message, true); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
-  shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true);
+  shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
 }
 
@@ -161,6 +163,7 @@ const NAV = [
   { id: 'laporan', label: 'Laporan', icon: 'chart' },
   { id: 'anggaran', label: 'Anggaran', icon: 'target', mod: 'anggaran' },
   { id: 'kontak', label: 'Kontak', icon: 'users' },
+  { id: 'usaha', label: 'Usaha & Buku Saya', icon: 'store' },
   { id: 'pengaturan', label: 'Pengaturan', icon: 'gear' }
 ];
 const navAllowed = id => { const n = NAV.find(x => x.id === id); return n && (!n.mod || mods()[n.mod]); };
@@ -170,11 +173,12 @@ function shell() {
   const third = m.kasir ? { id: 'kasir', label: 'Kasir', icon: 'cart' } : { id: 'laporan', label: 'Laporan', icon: 'chart' };
   $('#app').innerHTML = `
   <aside class="side">
-    <button class="biz-switch" onclick="bizMenu()"><span class="e">${esc(st.emoji || T.emoji)}</span><span class="grow"><b class="ell">${esc(S.biz.name)}</b><small class="ell">${esc(T.label)}</small></span>${ic('chev')}</button>
-    <nav class="nav">${items.map(n => `${n.id === 'laporan' || n.id === 'pengaturan' ? '<div class="sep"></div>' : ''}<button data-nav="${n.id}" onclick="go('${n.id}')">${ic(n.icon)}<span>${n.label}</span></button>`).join('')}</nav>
+    <button class="biz-switch" onclick="bizMenu()"><span class="e">${esc(st.emoji || T.emoji)}</span><span class="grow"><b class="ell">${esc(S.biz.name)}</b><small class="ell">${esc(bizTypeLabel(S.biz))}</small></span>${ic('chev')}</button>
+    <nav class="nav">${items.map(n => `${n.id === 'laporan' || n.id === 'usaha' ? '<div class="sep"></div>' : ''}<button type="button" data-nav="${n.id}" onclick="go('${n.id}')">${ic(n.icon)}<span>${n.label}</span></button>`).join('')}</nav>
     <div class="side-foot">
+      ${secBadge()}
       <button class="btn sm install-btn ${S.installEvt ? '' : (isStandalone() ? 'hidden' : '')}" onclick="installApp()">${ic('install')} Install Aplikasi</button>
-      <div class="row small muted" style="padding:4px 6px"><span class="grow ell">${S.mode === 'cloud' ? '☁️ ' + esc(S.user && S.user.email) : '📱 Mode Lokal'}</span><button class="icon-btn" style="width:34px;height:34px" title="Keluar" onclick="logout()">${ic('logout')}</button></div>
+      <div class="row small muted" style="padding:2px 4px"><span class="grow ell">${S.mode === 'cloud' ? esc(S.user && S.user.email) : 'Data di perangkat ini'}</span>${Lock.enabled() ? `<button class="icon-btn" style="width:36px;height:36px" title="Kunci sekarang" onclick="Lock.show()">${ic('lock')}</button>` : ''}<button class="icon-btn" style="width:36px;height:36px" title="Keluar" onclick="logout()">${ic('logout')}</button></div>
     </div>
   </aside>
   <main class="main">
@@ -182,6 +186,7 @@ function shell() {
       <button class="icon-btn mob-only" onclick="openSide()" aria-label="Menu">${ic('menu')}</button>
       <div class="grow"><h2 id="pgTitle"></h2><div class="sub" id="pgSub"></div></div>
       <div id="topExtra" class="row desk-only"></div>
+      <button class="icon-btn ${LS.get('bk_privacy', false) ? 'on' : ''}" id="privBtn" onclick="togglePrivacy()" title="Sembunyikan / tampilkan nominal" aria-label="Sembunyikan nominal">${ic(LS.get('bk_privacy', false) ? 'eyeoff' : 'eye')}</button>
       <button class="icon-btn" onclick="openAlerts()" aria-label="Notifikasi">${ic('bell')}<span class="badge hidden" id="bellBadge"></span></button>
       <button class="btn primary desk-only" onclick="quickAdd()">${ic('plus')} Catat</button>
     </header>
@@ -207,14 +212,15 @@ function render() {
   $('#topExtra').innerHTML = '';
   $('#content').innerHTML = pg.html();
   pg.mount && pg.mount();
-  updateBell();
+  updateBell(); cacheBizSummary();
 }
 function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam') + ' 👋 ' + fmtDay(today()); }
 let _dc; function dataChanged() { clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
-  modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(T.label)}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
+  modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
   <button class="btn primary block mt" onclick="closeModal();closeOverlays();WZ.type='warung';showWizard(true)">${ic('plus')} Tambah Usaha Baru</button>
+  <button class="btn block mt" onclick="closeModal();go('usaha')">${ic('store')} Kelola Semua Usaha & Buku</button>
   <p class="muted xs" style="margin-bottom:0">Setiap usaha punya pembukuan, kategori, stok & laporan sendiri.</p>`);
 }
 

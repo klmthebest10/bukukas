@@ -40,8 +40,8 @@ function productForm(id) {
   const groups = [...new Set(S.d.products.map(x => x.group_name).filter(Boolean))];
   modal(id ? 'Edit Produk' : 'Produk Baru', `<form id="pf">
     <label class="f"><span>Nama produk / jasa</span><input class="inp" name="name" value="${esc(p.name)}" required autofocus></label>
-    <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
-      <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${['pcs', 'kg', 'gram', 'liter', 'butir', 'ikat', 'pack', 'dus', 'karung', 'sak', 'peti', 'porsi', 'ekor', 'botol', 'jasa'].map(u => `<option value="${u}">`).join('')}</datalist></label></div>
+    <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${[...new Set([...listGet('groups'), ...groups])].map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
+      <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${listGet('units').map(u => `<option value="${esc(u)}">`).join('')}</datalist></label></div>
     <div class="f-row"><label class="f"><span>Harga beli / modal</span>${moneyInput('buy_price', p.buy_price)}</label><label class="f"><span>Harga jual</span>${moneyInput('sell_price', p.sell_price)}</label></div>
     <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${p.stock === '' ? '' : N(p.stock)}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
     <label class="f"><span>Kode / SKU (opsional)</span><input class="inp" name="sku" value="${esc(p.sku || '')}"></label>
@@ -93,7 +93,7 @@ function opname(pid) {
   const p = prod(pid);
   modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(p.stock, 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
     <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${N(p.stock)}" autofocus></label>
-    <label class="f"><span>Alasan</span><select class="inp" name="note"><option>Stock opname</option><option>Barang rusak / busuk</option><option>Susut</option><option>Hilang</option><option>Dipakai sendiri</option><option>Koreksi salah input</option></select></label></form>`,
+    <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
       const f = formObj($('#opf')), real = N(f.real), diff = real - N(p.stock); if (!diff) return closeModal();
       const ok = await safe(async () => { await upd('products', pid, { stock: real }); await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');

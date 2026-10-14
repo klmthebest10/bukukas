@@ -92,7 +92,13 @@ const ICONS = {
   chev: '<path d="m6 9 6 6 6-6"/>', check: '<path d="M20 6 9 17l-5-5"/>',
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
-  install: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>'
+  install: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 7v7M9 11l3 3 3-3M10 18h4"/>',
+  store: '<path d="M3 9 4.5 4h15L21 9"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13v8h14v-8M10 21v-5h4v5"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff: '<path d="M9.9 4.2A10 10 0 0 1 12 4c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.4 4.5-1.1M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'
 };
 const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICONS[n] || ''}</svg>`;
 
@@ -305,8 +311,16 @@ function openSide() { $('.side').classList.add('on'); $('#scrim').classList.add(
 function busy(btn, on) { if (!btn) return; btn.disabled = on; if (on) { btn.dataset.t = btn.innerHTML; btn.innerHTML = '<span class="loader" style="width:18px;height:18px;border-width:3px"></span>'; } else if (btn.dataset.t) btn.innerHTML = btn.dataset.t; }
 
 /* ---------------- tema ---------------- */
-function applyTheme() { const t = LS.get('bk_theme', 'auto'); if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t); }
+function applyTheme() {
+  const t = LS.get('bk_theme', 'auto'), a = LS.get('bk_accent', 'blue'), el = document.documentElement;
+  if (t === 'auto') el.removeAttribute('data-theme'); else el.setAttribute('data-theme', t);
+  el.setAttribute('data-accent', a);
+  const m = document.querySelector('meta[name=theme-color]'); if (m) setTimeout(() => m.setAttribute('content', cssVar('--primary')), 0);
+  document.body && document.body.classList.toggle('privacy', !!LS.get('bk_privacy', false));
+}
 function setTheme(t) { LS.set('bk_theme', t); applyTheme(); render(); }
+function setAccent(a) { LS.set('bk_accent', a); applyTheme(); render(); }
+function togglePrivacy() { LS.set('bk_privacy', !LS.get('bk_privacy', false)); applyTheme(); const b = $('#privBtn'); if (b) { b.innerHTML = ic(LS.get('bk_privacy', false) ? 'eyeoff' : 'eye'); b.classList.toggle('on', LS.get('bk_privacy', false)); } toast(LS.get('bk_privacy', false) ? 'Nominal disembunyikan 🙈' : 'Nominal ditampilkan'); }
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------------- PWA ---------------- */
@@ -377,6 +391,7 @@ function showAuth(tab = 'login', msg = '') {
       <button class="btn primary block" id="authBtn">${tab === 'reg' ? 'Buat Akun' : 'Masuk'}</button>
     </form>
     ${tab === 'login' ? `<button class="btn ghost block mt small" onclick="forgotPass()">Lupa kata sandi?</button>` : ''}
+    <div class="secure-note">${ic('shield')}<span>Koneksi terenkripsi (HTTPS). Data usaha Anda hanya bisa diakses oleh akun Anda.</span></div>
     <div class="row between mt"><button class="btn ghost sm" onclick="useLocal()">Mode Lokal</button>${!cfg.fixed ? `<button class="btn ghost sm" onclick="LS.del('bk_cfg');location.reload()">Ganti database</button>` : ''}</div></div>`);
 }
 async function doAuth(e, tab) {
@@ -400,9 +415,10 @@ async function forgotPass() {
   const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
   toast(error ? error.message : 'Link reset kata sandi dikirim ke email', !!error);
 }
-async function logout() {
-  confirmBox('Keluar dari akun ini?', async () => {
-    if (S.mode === 'cloud') await S.sb.auth.signOut(); else LS.del('bk_mode');
+async function logout(all) {
+  confirmBox(all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?', async () => {
+    LS.del('bk_pin');
+    if (S.mode === 'cloud') await S.sb.auth.signOut(all ? { scope: 'global' } : undefined); else LS.del('bk_mode');
     location.reload();
   }, 'Keluar');
 }
@@ -418,7 +434,7 @@ async function openBiz(b) {
   S.biz = normalizeBiz(b); APP_TZ = S.biz.settings.tz || 'Asia/Jakarta'; LS.set('bk_biz', b.id); S.cart = []; screen('<div class="loader"></div>');
   try { S.d = await B().load(b.id); } catch (e) { toast('Gagal memuat: ' + e.message, true); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
-  shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true);
+  shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
 }
 
@@ -488,6 +504,7 @@ const NAV = [
   { id: 'laporan', label: 'Laporan', icon: 'chart' },
   { id: 'anggaran', label: 'Anggaran', icon: 'target', mod: 'anggaran' },
   { id: 'kontak', label: 'Kontak', icon: 'users' },
+  { id: 'usaha', label: 'Usaha & Buku Saya', icon: 'store' },
   { id: 'pengaturan', label: 'Pengaturan', icon: 'gear' }
 ];
 const navAllowed = id => { const n = NAV.find(x => x.id === id); return n && (!n.mod || mods()[n.mod]); };
@@ -497,11 +514,12 @@ function shell() {
   const third = m.kasir ? { id: 'kasir', label: 'Kasir', icon: 'cart' } : { id: 'laporan', label: 'Laporan', icon: 'chart' };
   $('#app').innerHTML = `
   <aside class="side">
-    <button class="biz-switch" onclick="bizMenu()"><span class="e">${esc(st.emoji || T.emoji)}</span><span class="grow"><b class="ell">${esc(S.biz.name)}</b><small class="ell">${esc(T.label)}</small></span>${ic('chev')}</button>
-    <nav class="nav">${items.map(n => `${n.id === 'laporan' || n.id === 'pengaturan' ? '<div class="sep"></div>' : ''}<button data-nav="${n.id}" onclick="go('${n.id}')">${ic(n.icon)}<span>${n.label}</span></button>`).join('')}</nav>
+    <button class="biz-switch" onclick="bizMenu()"><span class="e">${esc(st.emoji || T.emoji)}</span><span class="grow"><b class="ell">${esc(S.biz.name)}</b><small class="ell">${esc(bizTypeLabel(S.biz))}</small></span>${ic('chev')}</button>
+    <nav class="nav">${items.map(n => `${n.id === 'laporan' || n.id === 'usaha' ? '<div class="sep"></div>' : ''}<button type="button" data-nav="${n.id}" onclick="go('${n.id}')">${ic(n.icon)}<span>${n.label}</span></button>`).join('')}</nav>
     <div class="side-foot">
+      ${secBadge()}
       <button class="btn sm install-btn ${S.installEvt ? '' : (isStandalone() ? 'hidden' : '')}" onclick="installApp()">${ic('install')} Install Aplikasi</button>
-      <div class="row small muted" style="padding:4px 6px"><span class="grow ell">${S.mode === 'cloud' ? '☁️ ' + esc(S.user && S.user.email) : '📱 Mode Lokal'}</span><button class="icon-btn" style="width:34px;height:34px" title="Keluar" onclick="logout()">${ic('logout')}</button></div>
+      <div class="row small muted" style="padding:2px 4px"><span class="grow ell">${S.mode === 'cloud' ? esc(S.user && S.user.email) : 'Data di perangkat ini'}</span>${Lock.enabled() ? `<button class="icon-btn" style="width:36px;height:36px" title="Kunci sekarang" onclick="Lock.show()">${ic('lock')}</button>` : ''}<button class="icon-btn" style="width:36px;height:36px" title="Keluar" onclick="logout()">${ic('logout')}</button></div>
     </div>
   </aside>
   <main class="main">
@@ -509,6 +527,7 @@ function shell() {
       <button class="icon-btn mob-only" onclick="openSide()" aria-label="Menu">${ic('menu')}</button>
       <div class="grow"><h2 id="pgTitle"></h2><div class="sub" id="pgSub"></div></div>
       <div id="topExtra" class="row desk-only"></div>
+      <button class="icon-btn ${LS.get('bk_privacy', false) ? 'on' : ''}" id="privBtn" onclick="togglePrivacy()" title="Sembunyikan / tampilkan nominal" aria-label="Sembunyikan nominal">${ic(LS.get('bk_privacy', false) ? 'eyeoff' : 'eye')}</button>
       <button class="icon-btn" onclick="openAlerts()" aria-label="Notifikasi">${ic('bell')}<span class="badge hidden" id="bellBadge"></span></button>
       <button class="btn primary desk-only" onclick="quickAdd()">${ic('plus')} Catat</button>
     </header>
@@ -534,14 +553,15 @@ function render() {
   $('#topExtra').innerHTML = '';
   $('#content').innerHTML = pg.html();
   pg.mount && pg.mount();
-  updateBell();
+  updateBell(); cacheBizSummary();
 }
 function sapa() { const h = nowTZ().h; return (h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam') + ' 👋 ' + fmtDay(today()); }
 let _dc; function dataChanged() { clearTimeout(_dc); _dc = setTimeout(() => { updateBell(); checkAlerts(false); }, 400); }
 
 function bizMenu() {
-  modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(T.label)}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
+  modal('Pilih Usaha', `<div class="list">${S.businesses.map(b => { const T = TEMPLATES[b.type] || TEMPLATES.umum; return `<div class="li" onclick="closeModal();openBiz(S.businesses.find(x=>x.id==='${b.id}'))"><div class="av">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow"><div class="t">${esc(b.name)}</div><div class="s">${esc(bizTypeLabel(b))}</div></div>${b.id === S.biz.id ? `<span class="pill in">Aktif</span>` : ''}</div>`; }).join('')}</div>
   <button class="btn primary block mt" onclick="closeModal();closeOverlays();WZ.type='warung';showWizard(true)">${ic('plus')} Tambah Usaha Baru</button>
+  <button class="btn block mt" onclick="closeModal();go('usaha')">${ic('store')} Kelola Semua Usaha & Buku</button>
   <p class="muted xs" style="margin-bottom:0">Setiap usaha punya pembukuan, kategori, stok & laporan sendiri.</p>`);
 }
 
@@ -637,7 +657,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && S.
 function mkChart(id, cfg) {
   const el = document.getElementById(id); if (!el) return;
   if (!window.Chart) { el.parentElement.innerHTML = '<div class="empty small">Grafik memerlukan koneksi internet saat pertama dibuka.</div>'; return; }
-  Chart.defaults.font.family = '"Plus Jakarta Sans", system-ui, sans-serif'; Chart.defaults.color = cssVar('--muted'); Chart.defaults.borderColor = cssVar('--line');
+  Chart.defaults.font.family = '"Plus Jakarta Sans", system-ui, sans-serif'; Chart.defaults.font.size = 12.5; Chart.defaults.color = cssVar('--text-2'); Chart.defaults.borderColor = cssVar('--line');
+  const tt = Chart.defaults.plugins.tooltip; if (tt) { tt.backgroundColor = 'rgba(10,17,32,.92)'; tt.titleColor = '#fff'; tt.bodyColor = '#e5ecf7'; tt.padding = 12; tt.cornerRadius = 12; tt.titleFont = { weight: '700', size: 13 }; tt.bodyFont = { size: 13 }; tt.boxPadding = 6; tt.usePointStyle = true; }
   const c = new Chart(el, cfg); S.charts.push(c); return c;
 }
 const moneyTip = { callbacks: { label: c => ' ' + c.dataset.label + ': ' + money(c.parsed.y ?? c.parsed) } };
@@ -653,17 +674,19 @@ function buckets(r, filterFn = isPL) {
 function flowChart(id, r) {
   const b = buckets(r);
   mkChart(id, { type: 'bar', data: { labels: b.labels, datasets: [
-    { label: 'Pemasukan', data: b.inc, backgroundColor: cssVar('--in'), borderRadius: 6, maxBarThickness: 18 },
-    { label: 'Pengeluaran', data: b.out, backgroundColor: cssVar('--out'), borderRadius: 6, maxBarThickness: 18 },
-    { label: 'Laba', type: 'line', data: b.inc.map((v, i) => v - b.out[i]), borderColor: cssVar('--info'), backgroundColor: cssVar('--info'), tension: .35, pointRadius: 0, borderWidth: 2 }] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: moneyTip },
-      scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { ticks: { callback: v => short(v) } } } } });
+    { label: 'Pemasukan', data: b.inc, backgroundColor: cssVar('--c-in'), borderRadius: 7, maxBarThickness: 22, order: 2 },
+    { label: 'Pengeluaran', data: b.out, backgroundColor: cssVar('--c-out'), borderRadius: 7, maxBarThickness: 22, order: 2 },
+    { label: 'Laba bersih', type: 'line', data: b.inc.map((v, i) => v - b.out[i]), borderColor: cssVar('--c-line'), backgroundColor: cssVar('--c-line'), tension: .35, pointRadius: b.labels.length > 31 ? 0 : 3, pointHoverRadius: 6, borderWidth: 2.5, order: 1 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10, padding: 16, font: { weight: '600' } } }, tooltip: moneyTip },
+      scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { border: { display: false }, grid: { color: cssVar('--line') }, ticks: { callback: v => short(v), maxTicksLimit: 6 } } } } });
 }
 function donut(id, type, r) {
   const m = {}; S.d.transactions.forEach(t => { if (t.type === type && isPL(t) && inR(t.date, r.from, r.to)) m[t.category_id] = (m[t.category_id] || 0) + N(t.amount); });
   const rows = Object.entries(m).sort((a, b) => b[1] - a[1]); if (!rows.length) return false;
-  mkChart(id, { type: 'doughnut', data: { labels: rows.map(x => (cat(x[0]) || {}).name || '-'), datasets: [{ data: rows.map(x => x[1]), backgroundColor: rows.map((x, i) => (cat(x[0]) || {}).color || PALETTE[i % 12]), borderWidth: 2, borderColor: cssVar('--surface') }] },
-    options: { maintainAspectRatio: false, cutout: '68%', plugins: { legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 8, font: { size: 12 } } }, tooltip: { callbacks: { label: c => ' ' + c.label + ': ' + money(c.parsed) } } } } });
+  const total = sum(rows, x => x[1]); const top = rows.slice(0, 6); if (rows.length > 6) top.push(['_other', sum(rows.slice(6), x => x[1])]);
+  const center = { id: 'center', afterDraw(ch) { const { ctx, chartArea: a } = ch; if (!a) return; const x = (a.left + a.right) / 2, y = (a.top + a.bottom) / 2; ctx.save(); ctx.textAlign = 'center'; ctx.fillStyle = cssVar('--muted'); ctx.font = '600 11px "Plus Jakarta Sans",sans-serif'; ctx.fillText('Total', x, y - 9); ctx.fillStyle = cssVar('--text'); ctx.font = '800 15px "Plus Jakarta Sans",sans-serif'; ctx.fillText(document.body.classList.contains('privacy') ? '•••' : 'Rp ' + short(total), x, y + 10); ctx.restore(); } };
+  mkChart(id, { type: 'doughnut', plugins: [center], data: { labels: top.map(x => x[0] === '_other' ? 'Lainnya' : ((cat(x[0]) || {}).name || '-')), datasets: [{ data: top.map(x => x[1]), backgroundColor: top.map((x, i) => x[0] === '_other' ? '#94a3b8' : ((cat(x[0]) || {}).color || PALETTE[i % 12])), borderWidth: 3, borderColor: cssVar('--surface'), hoverOffset: 8 }] },
+    options: { maintainAspectRatio: false, cutout: '66%', plugins: { legend: { position: window.innerWidth < 640 ? 'bottom' : 'right', labels: { usePointStyle: true, boxWidth: 10, padding: 12, font: { size: 12.5, weight: '600' }, generateLabels: ch => ch.data.labels.map((l, i) => ({ text: l + '  ' + Math.round(ch.data.datasets[0].data[i] / total * 100) + '%', fillStyle: ch.data.datasets[0].backgroundColor[i], strokeStyle: 'transparent', pointStyle: 'circle', index: i, fontColor: cssVar('--text-2') })) } }, tooltip: { callbacks: { label: c => ' ' + c.label + ': ' + money(c.parsed) + ' (' + Math.round(c.parsed / total * 100) + '%)' } } } } });
   return true;
 }
 function trendHTML(cur, prev, invert) {
@@ -1054,8 +1077,8 @@ function productForm(id) {
   const groups = [...new Set(S.d.products.map(x => x.group_name).filter(Boolean))];
   modal(id ? 'Edit Produk' : 'Produk Baru', `<form id="pf">
     <label class="f"><span>Nama produk / jasa</span><input class="inp" name="name" value="${esc(p.name)}" required autofocus></label>
-    <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
-      <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${['pcs', 'kg', 'gram', 'liter', 'butir', 'ikat', 'pack', 'dus', 'karung', 'sak', 'peti', 'porsi', 'ekor', 'botol', 'jasa'].map(u => `<option value="${u}">`).join('')}</datalist></label></div>
+    <div class="f-row"><label class="f"><span>Kelompok</span><input class="inp" name="group_name" list="grpL" value="${esc(p.group_name || '')}" placeholder="cth: Sembako"><datalist id="grpL">${[...new Set([...listGet('groups'), ...groups])].map(g => `<option value="${esc(g)}">`).join('')}</datalist></label>
+      <label class="f"><span>Satuan</span><input class="inp" name="unit" list="unitL" value="${esc(p.unit || '')}"><datalist id="unitL">${listGet('units').map(u => `<option value="${esc(u)}">`).join('')}</datalist></label></div>
     <div class="f-row"><label class="f"><span>Harga beli / modal</span>${moneyInput('buy_price', p.buy_price)}</label><label class="f"><span>Harga jual</span>${moneyInput('sell_price', p.sell_price)}</label></div>
     <div class="f-row"><label class="f"><span>${id ? 'Stok saat ini' : 'Stok awal'}</span><input class="inp" type="number" step="any" name="stock" value="${p.stock === '' ? '' : N(p.stock)}" ${id ? 'readonly title="Ubah lewat Stok Masuk / Opname"' : ''}></label><label class="f"><span>Stok minimum (peringatan)</span><input class="inp" type="number" step="any" name="min_stock" value="${p.min_stock === '' ? '' : N(p.min_stock)}"></label></div>
     <label class="f"><span>Kode / SKU (opsional)</span><input class="inp" name="sku" value="${esc(p.sku || '')}"></label>
@@ -1107,7 +1130,7 @@ function opname(pid) {
   const p = prod(pid);
   modal('Sesuaikan Stok — ' + esc(p.name), `<form id="opf"><p class="muted small" style="margin-top:0">Stok tercatat: <b>${numf(p.stock, 2)} ${esc(p.unit || '')}</b>. Masukkan jumlah stok fisik sebenarnya.</p>
     <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${N(p.stock)}" autofocus></label>
-    <label class="f"><span>Alasan</span><select class="inp" name="note"><option>Stock opname</option><option>Barang rusak / busuk</option><option>Susut</option><option>Hilang</option><option>Dipakai sendiri</option><option>Koreksi salah input</option></select></label></form>`,
+    <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
       const f = formObj($('#opf')), real = N(f.real), diff = real - N(p.stock); if (!diff) return closeModal();
       const ok = await safe(async () => { await upd('products', pid, { stock: real }); await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
@@ -1342,61 +1365,17 @@ function ctList() {
 function contactForm(id) {
   const c = id ? contact(id) : { name: '', type: S.ct.type === 'all' ? 'pelanggan' : S.ct.type, phone: '', address: '', note: '' };
   modal(id ? 'Edit Kontak' : 'Kontak Baru', `<form id="cf"><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label>
-    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${['pelanggan', 'supplier', 'lainnya'].map(t => `<option ${c.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
+    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[...new Set([...listGet('ctypes'), c.type].filter(Boolean))].map(t => `<option ${c.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
     <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>`,
     { foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
       onMount: m => m.querySelector('#cfs').onclick = async () => { const f = formObj($('#cf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), type: f.type, phone: f.phone.trim(), address: f.address.trim(), note: f.note.trim() };
         const ok = await safe(async () => { if (id) await upd('contacts', id, row); else await add('contacts', row); return true; }, 'Kontak disimpan'); if (ok) { closeModal(); render(); } } });
 }
 
-/* ---------------- PENGATURAN ---------------- */
-PAGES.pengaturan = {
-  html() {
-    const b = S.biz, st = b.settings, m = mods(), ns = notifSet(), th = LS.get('bk_theme', 'auto');
-    const perm = 'Notification' in window ? Notification.permission : 'unsupported';
-    const sw = (name, on, fn) => `<label class="switch"><input type="checkbox" ${on ? 'checked' : ''} onchange="${fn}('${name}',this.checked)"><i></i></label>`;
-    return `<div class="grid g2" style="align-items:start">
-    <div class="grid" style="align-content:start">
-      <div class="card"><div class="card-h"><h3>🏪 Profil Usaha</h3></div><form id="bizF">
-        <div class="f-row" style="grid-template-columns:80px 1fr"><label class="f"><span>Ikon</span><input class="inp" name="emoji" value="${esc(st.emoji || '')}" maxlength="4" style="text-align:center;font-size:20px"></label><label class="f"><span>Nama usaha</span><input class="inp" name="name" value="${esc(b.name)}" required></label></div>
-        <div class="f-row"><label class="f"><span>Jenis usaha</span><select class="inp" name="type">${Object.entries(TEMPLATES).map(([k, t]) => `<option value="${k}" ${b.type === k ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}</select></label><label class="f"><span>Zona waktu</span><select class="inp" name="tz">${Object.entries(TIMEZONES).map(([k, v]) => `<option value="${k}" ${(st.tz || 'Asia/Jakarta') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>
-        <div class="f-row"><label class="f"><span>No HP usaha</span><input class="inp" name="phone" value="${esc(b.phone || '')}"></label><label class="f"><span>Target omzet / bulan</span>${moneyInput('target', st.target)}</label></div>
-        <label class="f"><span>Alamat (tampil di struk)</span><input class="inp" name="address" value="${esc(b.address || '')}"></label>
-        <button type="button" class="btn primary" onclick="saveBiz()">Simpan Profil</button></form></div>
-
-      <div class="card"><div class="card-h"><h3>🧩 Fitur yang Ditampilkan</h3></div>${Object.entries(MODULES).map(([k, [l, d]]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, m[k], 'setMod')}</div>`).join('')}</div>
-
-      <div class="card" id="set-notif"><div class="card-h"><h3>🔔 Notifikasi & Pengingat</h3></div>
-        <div class="set-row"><div class="t grow"><b>Notifikasi perangkat (pop-up HP/PC)</b><small>${perm === 'granted' ? 'Izin diberikan ✅' : perm === 'denied' ? 'Diblokir — buka pengaturan browser/HP untuk mengizinkan' : perm === 'unsupported' ? 'Tidak didukung browser ini — install aplikasi dulu' : 'Belum diizinkan'}</small></div>${ns.push && perm === 'granted' ? sw('push', true, 'setNotif') : `<button class="btn sm primary" onclick="enablePush()">Aktifkan</button>`}</div>
-        <p class="xs muted" style="margin:10px 0 2px">Pilih pemberitahuan yang ingin ditampilkan:</p>
-        ${[['stok', 'Stok menipis / habis', 'Saat stok ≤ batas minimum produk'], ['piutang', 'Piutang jatuh tempo', 'Tagihan pelanggan mendekati / lewat tempo'], ['hutang', 'Hutang jatuh tempo', 'Kewajiban bayar mendekati / lewat tempo'], ['anggaran', 'Anggaran hampir habis', 'Pengeluaran kategori ≥ 80% batas'], ['target', 'Target omzet tercapai', 'Kabar gembira saat target bulanan tercapai'], ['catat', 'Pengingat catat transaksi', 'Jika belum ada transaksi hari ini'], ['harian', 'Pengingat catatan harian', 'Jika data produksi hari ini belum diisi'], ['ringkasan', 'Ringkasan harian', 'Total masuk & keluar setiap hari']].map(([k, l, d]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, ns[k], 'setNotif')}</div>`).join('')}
-        <div class="f-row mt"><label class="f"><span>Jam pengingat harian</span><input class="inp" type="time" value="${ns.jam}" onchange="setNotif('jam',this.value)"></label><label class="f"><span>Ingatkan jatuh tempo (hari sebelum)</span><input class="inp" type="number" min="0" max="30" value="${ns.hari_jatuh_tempo}" onchange="setNotif('hari_jatuh_tempo',Number(this.value))"></label></div>
-        <button class="btn sm" onclick="testNotif()">🔔 Kirim notifikasi uji</button>
-        <p class="xs muted">${serverPush() ? '☁️ Push server aktif: pengingat dikirim dari server setiap 15 menit dan tetap muncul walau aplikasi ditutup.' : S.mode === 'cloud' ? 'Setelah diaktifkan, pengingat dikirim dari server dan tetap muncul walau aplikasi ditutup.' : 'Mode lokal: notifikasi diperiksa saat aplikasi dibuka & setiap 5 menit selama aplikasi berjalan.'}</p></div>
-    </div>
-    <div class="grid" style="align-content:start">
-      <div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><button class="btn sm" onclick="accountForm()">${ic('plus')}</button></div>
-        <div class="list">${S.d.accounts.map(a => `<div class="li" onclick="accountForm('${a.id}')"><div class="av" style="background:${a.color || '#0d9488'}22">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'}</div><div class="grow"><div class="t">${esc(a.name)}</div><div class="s">Saldo awal ${money(a.opening_balance)}</div></div><b class="num">${money(accBalance(a))}</b></div>`).join('')}</div></div>
-
-      <div class="card"><div class="card-h"><h3>🏷️ Kategori</h3><button class="btn sm" onclick="catForm()">${ic('plus')}</button></div>
-        ${['in', 'out'].map(t => `<p class="xs muted" style="margin:8px 0 6px;font-weight:700">${t === 'in' ? 'PEMASUKAN' : 'PENGELUARAN'}</p><div class="row wrap gap-s">${cats(t).map(c => `<button class="chip" onclick="catForm('${c.id}')" style="border-color:${c.color || 'var(--line)'}">${esc(c.icon || '')} ${esc(c.name)}</button>`).join('')}</div>`).join('')}</div>
-
-      <div class="card"><div class="card-h"><h3>📋 Kolom Catatan Harian</h3><button class="btn sm" onclick="metricForm()">${ic('plus')}</button></div>
-        ${metrics().length ? `<div class="list">${metrics().map((x, i) => `<div class="li" onclick="metricForm(${i})"><div class="av">📈</div><div class="grow"><div class="t">${esc(x.label)}</div><div class="s">Satuan: ${esc(x.unit)} • ${x.agg === 'last' ? 'nilai terakhir' : x.agg === 'avg' ? 'rata-rata' : 'dijumlahkan'}</div></div></div>`).join('')}</div>` : '<p class="muted small">Belum ada. Contoh: produksi telur, pakan, panen, porsi terjual.</p>'}</div>
-
-      <div class="card"><div class="card-h"><h3>🎨 Tampilan</h3></div><div class="seg">${[['auto', '🌗 Otomatis'], ['light', '☀️ Terang'], ['dark', '🌙 Gelap']].map(([k, l]) => `<button class="${th === k ? 'on' : ''}" onclick="setTheme('${k}')">${l}</button>`).join('')}</div>
-        <button class="btn block install-btn ${isStandalone() ? 'hidden' : ''}" onclick="installApp()">${ic('install')} Install aplikasi ke perangkat ini</button></div>
-
-      <div class="card"><div class="card-h"><h3>🗄️ Data & Akun</h3></div>
-        <div class="set-row"><div class="t grow"><b>${S.mode === 'cloud' ? '☁️ Tersimpan di Supabase' : '📱 Mode Lokal'}</b><small>${S.mode === 'cloud' ? esc(S.user && S.user.email) : 'Data hanya ada di perangkat ini. Rutin backup ya!'}</small></div>${S.mode === 'local' ? `<button class="btn sm" onclick="LS.del('bk_mode');location.reload()">Hubungkan Cloud</button>` : ''}</div>
-        <div class="row wrap mt"><button class="btn sm" onclick="backup()">${ic('download')} Backup (JSON)</button><label class="btn sm">${ic('upload')} Pulihkan<input type="file" accept=".json,application/json" hidden onchange="restore(this.files[0])"></label><button class="btn sm" onclick="exportCSV(S.d.transactions.slice().sort(sortTx),'semua-transaksi')">${ic('download')} Semua transaksi (CSV)</button></div>
-        <div class="row wrap mt"><button class="btn sm danger" onclick="clearData()">Kosongkan data transaksi</button><button class="btn sm danger" onclick="deleteBiz()">Hapus usaha ini</button><button class="btn sm" onclick="logout()">${ic('logout')} Keluar</button></div></div>
-    </div></div>`;
-  }
-};
+/* ---------------- PENGATURAN: lihat 6-extras.js ---------------- */
 async function saveBiz() {
   const f = formObj($('#bizF')); if (!f.name.trim()) return toast('Nama wajib diisi', true);
-  const st = S.biz.settings; st.emoji = f.emoji.trim() || (TEMPLATES[f.type] || TEMPLATES.umum).emoji; st.target = parseMoney(f.target); st.tz = f.tz || 'Asia/Jakarta'; APP_TZ = st.tz;
+  const st = S.biz.settings; st.emoji = f.emoji.trim() || (TEMPLATES[f.type] || TEMPLATES.umum).emoji; st.typeLabel = (f.type_label || '').trim(); st.target = parseMoney(f.target); st.tz = f.tz || 'Asia/Jakarta'; APP_TZ = st.tz;
   const typeChanged = f.type !== S.biz.type;
   if (serverPush()) subscribePush(true);
   const ok = await safe(() => updBiz({ name: f.name.trim(), type: f.type, currency: 'IDR', phone: f.phone.trim(), address: f.address.trim(), settings: st }), 'Profil usaha disimpan');
@@ -1434,13 +1413,14 @@ function accountForm(id) {
         const ok = await safe(async () => { if (id) await upd('accounts', id, row); else await add('accounts', row); return true; }, 'Akun disimpan'); if (ok) { closeModal(); render(); } } });
 }
 function deleteAccount(id) { if (S.d.transactions.some(t => t.account_id === id || t.to_account_id === id)) return toast('Akun sudah punya transaksi, tidak bisa dihapus', true); if (S.d.accounts.length <= 1) return toast('Minimal harus ada 1 akun', true); confirmBox('Hapus akun ini?', async () => { await safe(() => del('accounts', id), 'Akun dihapus'); render(); }); }
-function catForm(id) {
-  const c = id ? cat(id) : { name: '', type: 'out', icon: '🧾', color: PALETTE[S.d.categories.length % 12] };
+function catForm(id, type) {
+  const c = id ? cat(id) : { name: '', type: type || 'out', icon: '🧾', color: PALETTE[S.d.categories.length % 12] };
   modal(id ? 'Edit Kategori' : 'Kategori Baru', `<form id="kf"><div class="f-row" style="grid-template-columns:80px 1fr"><label class="f"><span>Ikon</span><input class="inp" name="icon" value="${esc(c.icon || '')}" maxlength="4" style="text-align:center;font-size:20px"></label><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label></div>
-    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type" ${id ? 'disabled' : ''}><option value="in" ${c.type === 'in' ? 'selected' : ''}>Pemasukan</option><option value="out" ${c.type === 'out' ? 'selected' : ''}>Pengeluaran</option></select></label><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${c.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
+    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type"><option value="in" ${c.type === 'in' ? 'selected' : ''}>Pemasukan</option><option value="out" ${c.type === 'out' ? 'selected' : ''}>Pengeluaran</option></select></label><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${c.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
     <p class="xs muted">Ide ikon: 💰 🛒 📦 🥚 🌽 💊 🐔 🍊 🚚 💡 🏠 👷 🧾 📣 🔧 🎁</p></form>`,
     { foot: `${id ? `<button class="btn danger" onclick="deleteCat('${id}')">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="kfs">Simpan</button>`,
-      onMount: m => m.querySelector('#kfs').onclick = async () => { const f = formObj($('#kf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), icon: f.icon.trim(), color: f.color }; if (!id) row.type = f.type;
+      onMount: m => m.querySelector('#kfs').onclick = async () => { const f = formObj($('#kf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), icon: f.icon.trim(), color: f.color, type: f.type };
+        if (id && f.type !== c.type && S.d.transactions.some(t => t.category_id === id)) return toast('Jenis tidak bisa diubah: kategori ini sudah dipakai transaksi', true);
         const ok = await safe(async () => { if (id) await upd('categories', id, row); else await add('categories', row); return true; }, 'Kategori disimpan'); if (ok) { closeModal(); render(); } } });
 }
 function deleteCat(id) {
@@ -1489,12 +1469,223 @@ function clearData() {
     }, 'Data dikosongkan'); render();
   }, 'Ya, kosongkan');
 }
-function deleteBiz() {
-  modal('Hapus Usaha', `<p>Ketik <b>${esc(S.biz.name)}</b> untuk menghapus usaha ini beserta <b>seluruh</b> datanya secara permanen.</p><input class="inp" id="delName" autocomplete="off">`,
-    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn danger" id="delGo">Hapus Permanen</button>`, onMount: m => m.querySelector('#delGo').onclick = async () => {
-      if ($('#delName').value.trim() !== S.biz.name) return toast('Nama tidak cocok', true);
-      const ok = await safe(() => B().removeBiz(S.biz.id).then(() => true)); if (!ok) return;
-      LS.del('bk_biz'); location.reload(); } });
+function deleteBiz(id) {
+  const b = S.businesses.find(x => x.id === (id || S.biz.id)); if (!b) return;
+  modal('Hapus Usaha', `<div class="alert-item lv-danger" style="cursor:default"><div class="ai">⚠️</div><div><b>Tindakan permanen</b><small>Seluruh transaksi, stok, hutang/piutang & laporan usaha ini akan terhapus dan tidak bisa dikembalikan. Sebaiknya Backup dulu.</small></div></div><p>Ketik <b>${esc(b.name)}</b> untuk konfirmasi:</p><input class="inp" id="delName" autocomplete="off">`,
+    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn danger solid" id="delGo">${ic('trash')} Hapus Permanen</button>`, onMount: m => m.querySelector('#delGo').onclick = async () => {
+      if ($('#delName').value.trim() !== b.name) return toast('Nama tidak cocok', true);
+      const ok = await safe(() => B().removeBiz(b.id).then(() => true)); if (!ok) return;
+      LS.del('bk_sum_' + b.id); S.businesses = S.businesses.filter(x => x.id !== b.id); closeModal(); toast('Usaha "' + b.name + '" dihapus');
+      if (b.id === S.biz.id) { LS.del('bk_biz'); if (S.businesses.length) openBiz(S.businesses[0]); else showWizard(); } else render(); } });
+}
+/* =====================================================================
+   PENGATURAN, DAFTAR PILIHAN, USAHA & BUKU, KEAMANAN (PIN & PRIVASI)
+   ===================================================================== */
+const bizTypeLabel = b => (b && b.settings && b.settings.typeLabel) || (TEMPLATES[b && b.type] || TEMPLATES.umum).label;
+const secBadge = () => `<div class="sec-badge ${S.mode === 'cloud' ? '' : 'local'}" title="${S.mode === 'cloud' ? 'Koneksi HTTPS terenkripsi; data dilindungi Row Level Security (hanya akun Anda yang bisa membaca)' : 'Data hanya tersimpan di browser perangkat ini'}">${ic('shield')}<span>${S.mode === 'cloud' ? 'Tersinkron & terenkripsi' : 'Tersimpan di perangkat ini'}</span>${Lock.enabled() ? ic('lock') : ''}</div>`;
+function cacheBizSummary() { if (!S.biz) return; const mr = monthRange(0); LS.set('bk_sum_' + S.biz.id, { bal: totalBalance(), profit: totals(mr.from, mr.to).profit, at: Date.now() }); }
+window.addEventListener('scroll', () => { const t = $('.topbar'); if (t) t.classList.toggle('scrolled', window.scrollY > 8); }, { passive: true });
+
+/* ---------------- DAFTAR PILIHAN (bisa ditambah / diubah / dihapus) ---------------- */
+const DEFAULT_LISTS = {
+  units: ['pcs', 'kg', 'gram', 'liter', 'butir', 'ikat', 'pack', 'dus', 'karung', 'sak', 'peti', 'porsi', 'ekor', 'botol', 'jasa'],
+  groups: [],
+  ctypes: ['pelanggan', 'supplier', 'lainnya'],
+  reasons: ['Stock opname', 'Barang rusak / busuk', 'Susut', 'Hilang', 'Dipakai sendiri', 'Koreksi salah input']
+};
+const LIST_META = { units: ['Satuan produk', '⚖️', 'satuan'], groups: ['Kelompok produk', '🗂️', 'kelompok'], ctypes: ['Jenis kontak', '👥', 'jenis kontak'], reasons: ['Alasan sesuaikan stok', '📝', 'alasan'] };
+function listGet(k) { const l = ((S.biz && S.biz.settings.lists) || {})[k]; return Array.isArray(l) ? l : [...DEFAULT_LISTS[k]]; }
+function listItems(k) { return k === 'groups' ? [...new Set([...listGet('groups'), ...S.d.products.map(p => p.group_name).filter(Boolean)])] : listGet(k); }
+async function listSave(k, arr) { S.biz.settings.lists = { ...(S.biz.settings.lists || {}), [k]: arr }; await updBiz({ settings: S.biz.settings }); }
+function listUsage(k, v) { return k === 'units' ? S.d.products.filter(p => p.unit === v).length : k === 'groups' ? S.d.products.filter(p => p.group_name === v).length : k === 'ctypes' ? S.d.contacts.filter(c => c.type === v).length : 0; }
+const LIST_FIELD = { units: ['products', 'unit'], groups: ['products', 'group_name'], ctypes: ['contacts', 'type'] };
+async function listAdd(k, v) { v = String(v || '').trim(); if (!v) return; const l = listItems(k); if (l.some(x => x.toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada', true); await safe(() => listSave(k, [...l, v]), 'Ditambahkan'); render(); }
+function listEdit(k, i) {
+  const l = listItems(k), old = l[i];
+  modal('Ubah ' + LIST_META[k][2], `<form id="lef"><label class="f"><span>Nama</span><input class="inp" name="v" value="${esc(old)}" required autofocus maxlength="40"></label>${listUsage(k, old) ? `<p class="xs muted">${listUsage(k, old)} data yang memakai "${esc(old)}" akan ikut diperbarui.</p>` : ''}</form>`,
+    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="lefs">Simpan</button>`, onMount: m => m.querySelector('#lefs').onclick = async () => {
+      const v = formObj($('#lef')).v.trim(); if (!v || v === old) return closeModal();
+      if (l.some((x, j) => j !== i && x.toLowerCase() === v.toLowerCase())) return toast('Nama sudah dipakai', true);
+      const nl = [...l]; nl[i] = v;
+      await safe(async () => { const fd = LIST_FIELD[k]; if (fd) for (const r of S.d[fd[0]].filter(r => r[fd[1]] === old)) await upd(fd[0], r.id, { [fd[1]]: v }); await listSave(k, nl); }, 'Diperbarui');
+      closeModal(); render(); } });
+}
+function listDel(k, i) {
+  const l = listItems(k), v = l[i], n = listUsage(k, v);
+  confirmBox(`Hapus <b>${esc(v)}</b> dari daftar ${LIST_META[k][0].toLowerCase()}?` + (n ? (k === 'groups' ? ` <b>${n} produk</b> akan menjadi tanpa kelompok.` : ` ${n} data yang sudah memakainya tidak berubah.`) : ''), async () => {
+    await safe(async () => { if (k === 'groups') for (const p of S.d.products.filter(p => p.group_name === v)) await upd('products', p.id, { group_name: null }); await listSave(k, l.filter((_, j) => j !== i)); }, 'Dihapus');
+    render(); });
+}
+async function listReset(k) { confirmBox('Kembalikan daftar ' + LIST_META[k][0].toLowerCase() + ' ke bawaan?', async () => { await safe(() => listSave(k, [...DEFAULT_LISTS[k]]), 'Daftar dikembalikan'); render(); }, 'Kembalikan'); }
+
+/* ---------------- KUNCI PIN ---------------- */
+const Lock = {
+  buf: '', mode: 'unlock', tmp: null, onDone: null, fails: 0, until: 0,
+  enabled() { return !!LS.get('bk_pin', null); },
+  async hash(p) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('bukukas-pin:' + p)); return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join(''); },
+  check(boot) { if (boot && this.enabled() && !this._ok) this.show(); },
+  show(mode = 'unlock', onDone) { if (mode === 'unlock' && !this.enabled()) return; this.mode = mode; this.buf = ''; this.tmp = null; this.onDone = onDone || null; this.render(); $('#lock').classList.add('on'); },
+  hide() { $('#lock').classList.remove('on'); $('#lock').innerHTML = ''; },
+  title() { return { unlock: 'Masukkan PIN', set: 'Buat PIN baru (4 digit)', confirm: 'Ulangi PIN baru', verify: 'Masukkan PIN saat ini' }[this.mode]; },
+  render() {
+    $('#lock').innerHTML = `<div class="lock-card glass" role="dialog" aria-label="Kunci aplikasi"><div class="brand-logo" style="margin:0 auto 12px">${ic('lock')}</div><h3 style="margin:0">${this.title()}</h3><p class="xs muted" style="margin:6px 0 0">${S.biz ? esc(S.biz.name) + ' • ' : ''}${CONFIG.APP_NAME}</p>
+      <div class="pin-dots" id="pinDots">${[0, 1, 2, 3].map(i => `<i class="${i < this.buf.length ? 'f' : ''}"></i>`).join('')}</div>
+      <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" onclick="Lock.key('${n}')">${n}</button>`).join('')}<button type="button" style="font-size:13px" onclick="${this.mode === 'unlock' ? 'Lock.forgot()' : 'Lock.hide()'}">${this.mode === 'unlock' ? 'Lupa?' : 'Batal'}</button><button type="button" onclick="Lock.key('0')">0</button><button type="button" onclick="Lock.key('del')" aria-label="Hapus">⌫</button></div>
+      <div class="xs muted" id="pinMsg" style="min-height:18px;margin:14px 0 0"></div></div>`;
+  },
+  dots() { $$('#pinDots i').forEach((d, i) => d.classList.toggle('f', i < this.buf.length)); },
+  key(k) { if (Date.now() < this.until) return; if (k === 'del') { this.buf = this.buf.slice(0, -1); return this.dots(); } if (this.buf.length >= 4) return; this.buf += k; this.dots(); if (this.buf.length === 4) setTimeout(() => this.submit(), 140); },
+  err(msg) { const d = $('#pinDots'); if (d) { d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); } $('#pinMsg').textContent = msg; this.buf = ''; this.dots(); if (navigator.vibrate) navigator.vibrate(90); },
+  async submit() {
+    const p = this.buf;
+    if (this.mode === 'unlock' || this.mode === 'verify') {
+      if (await this.hash(p) === LS.get('bk_pin')) { this.fails = 0; this._ok = true; const cb = this.onDone; this.hide(); cb && cb(); }
+      else { this.fails++; if (this.fails >= 5) { this.until = Date.now() + 30000; this.fails = 0; this.err('Terlalu banyak salah. Coba lagi dalam 30 detik.'); } else this.err('PIN salah — ' + (5 - this.fails) + ' kesempatan lagi'); }
+    } else if (this.mode === 'set') { this.tmp = p; this.mode = 'confirm'; this.buf = ''; this.render(); }
+    else if (this.mode === 'confirm') {
+      if (p === this.tmp) { LS.set('bk_pin', await this.hash(p)); this._ok = true; this.hide(); toast('PIN aktif 🔒 aplikasi akan terkunci otomatis'); shell(); render(); }
+      else { this.mode = 'set'; this.render(); this.err('PIN tidak sama, silakan ulangi'); }
+    }
+  },
+  forgot() {
+    const m = $('#pinMsg');
+    if (S.mode !== 'cloud') { m.innerHTML = 'Mode lokal: PIN tidak bisa direset tanpa menghapus data browser.'; return; }
+    m.innerHTML = `Untuk reset PIN, keluar lalu login ulang.<br><button class="btn sm danger" style="margin-top:8px" onclick="Lock.reset()">Keluar & reset PIN</button>`;
+  },
+  async reset() { LS.del('bk_pin'); try { await S.sb.auth.signOut(); } catch (e) {} location.reload(); }
+};
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { LS.set('bk_hidden_at', Date.now()); return; }
+  if (!Lock.enabled() || !S.biz || $('#lock').classList.contains('on')) return;
+  const mins = Number(LS.get('bk_lock_after', 1)); if (mins < 0) return;
+  if (Date.now() - LS.get('bk_hidden_at', Date.now()) >= mins * 60000) { Lock._ok = false; Lock.show(); }
+});
+function pinAction(a) {
+  if (a === 'on') Lock.show('set');
+  else if (a === 'change') Lock.show('verify', () => Lock.show('set'));
+  else if (a === 'off') Lock.show('verify', () => { LS.del('bk_pin'); toast('PIN dimatikan'); shell(); render(); });
+}
+
+/* ---------------- USAHA & BUKU SAYA ---------------- */
+PAGES.usaha = {
+  html() {
+    return `<div class="toolbar"><div class="grow"><b style="font-size:16px">${S.businesses.length} usaha / buku pembukuan</b><div class="xs muted">Setiap usaha punya kas, kategori, stok, hutang & laporan yang terpisah. Pindah usaha kapan saja.</div></div>
+      <button class="btn primary" onclick="WZ.type='warung';showWizard(true)">${ic('plus')} Buat Usaha / Buku Baru</button></div>
+    <div class="grid g3">${S.businesses.map(bizCard).join('')}</div>
+    <div class="card mt"><div class="card-h"><h3>💡 Tips</h3></div><div class="small muted">Gunakan <b>Duplikat struktur</b> untuk membuat buku baru dengan kategori, akun, produk & kontak yang sama — misalnya buku per tahun, per cabang, atau per kandang — tanpa membawa transaksi lama.</div></div>`;
+  }
+};
+function bizCard(b) {
+  const T = TEMPLATES[b.type] || TEMPLATES.umum, s = LS.get('bk_sum_' + b.id, null), act = b.id === S.biz.id;
+  return `<div class="card biz-card ${act ? 'active' : ''}"><div class="top"><div class="e">${esc((b.settings && b.settings.emoji) || T.emoji)}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:16px">${esc(b.name)}</b><span class="xs muted">${esc(bizTypeLabel(b))}</span></div>${act ? '<span class="pill in">Aktif</span>' : ''}</div>
+    ${s ? `<div class="grid g2" style="gap:10px"><div><div class="xs muted">Saldo</div><b class="num">${money(s.bal)}</b></div><div><div class="xs muted">Laba bulan ini</div><b class="num ${s.profit < 0 ? 'c-out' : 'c-in'}">${money(s.profit)}</b></div></div><div class="xs muted">Diperbarui ${new Date(s.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</div>` : '<div class="xs muted">Buka usaha ini untuk melihat ringkasannya.</div>'}
+    <div class="row wrap">${act ? `<button class="btn sm" onclick="go('dashboard')">${ic('home')} Beranda</button>` : `<button class="btn sm primary" onclick="openBiz(S.businesses.find(x=>x.id==='${b.id}'))">Buka</button>`}<button class="btn sm" onclick="bizEdit('${b.id}')">${ic('edit')} Ubah</button><button class="btn sm" onclick="bizDuplicate('${b.id}')">${ic('copy')} Duplikat</button><button class="btn sm danger" title="Hapus usaha" onclick="deleteBiz('${b.id}')">${ic('trash')}</button></div></div>`;
+}
+function bizEdit(id) {
+  const b = S.businesses.find(x => x.id === id), st = b.settings || {};
+  modal('Ubah Usaha', `<form id="bef"><div class="f-row" style="grid-template-columns:80px 1fr"><label class="f"><span>Ikon</span><input class="inp" name="emoji" value="${esc(st.emoji || '')}" maxlength="4" style="text-align:center;font-size:20px"></label><label class="f"><span>Nama usaha / buku</span><input class="inp" name="name" value="${esc(b.name)}" required></label></div>
+    <div class="f-row"><label class="f"><span>Template jenis usaha</span><select class="inp" name="type">${Object.entries(TEMPLATES).map(([k, t]) => `<option value="${k}" ${b.type === k ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}</select></label>
+    <label class="f"><span>Nama jenis usaha (bebas)</span><input class="inp" name="type_label" value="${esc(st.typeLabel || '')}" placeholder="cth: Ternak Bebek, Toko Bangunan"></label></div></form>`,
+    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="befs">Simpan</button>`, onMount: m => m.querySelector('#befs').onclick = async () => {
+      const f = formObj($('#bef')); if (!f.name.trim()) return toast('Nama wajib diisi', true);
+      const settings = { ...st, emoji: f.emoji.trim() || (TEMPLATES[f.type] || TEMPLATES.umum).emoji, typeLabel: f.type_label.trim() };
+      const patch = { name: f.name.trim(), type: f.type, settings };
+      const ok = await safe(async () => { if (id === S.biz.id) await updBiz(patch); else { await B().update('businesses', id, patch); Object.assign(b, patch); } return true; }, 'Usaha diperbarui');
+      if (ok) { const sb = S.businesses.find(x => x.id === id); if (sb && sb !== S.biz && id === S.biz.id) Object.assign(sb, S.biz); closeModal(); shell(); render(); } } });
+}
+async function bizDuplicate(id) {
+  const src = S.businesses.find(x => x.id === id);
+  modal('Duplikat Struktur Usaha', `<form id="bdf"><p class="small muted" style="margin-top:0">Membuat buku baru dari <b>${esc(src.name)}</b>: kategori, akun (saldo awal 0), produk (stok 0), kontak, daftar pilihan & pengaturan ikut disalin. Transaksi tidak disalin.</p>
+    <label class="f"><span>Nama usaha / buku baru</span><input class="inp" name="name" value="${esc(src.name)} ${new Date().getFullYear() + 1}" required autofocus></label></form>`,
+    { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="bdfs">${ic('copy')} Buat</button>`, onMount: m => m.querySelector('#bdfs').onclick = async () => {
+      const name = formObj($('#bdf')).name.trim(); if (!name) return; const btn = $('#bdfs'); busy(btn, true);
+      const ok = await safe(async () => {
+        const data = id === S.biz.id ? S.d : await B().load(id);
+        const nb = { id: uid(), name, type: src.type, currency: 'IDR', created_at: new Date().toISOString(), settings: JSON.parse(JSON.stringify({ ...src.settings, sale_cat: null })) };
+        const res = await B().insert('businesses', [nb]); const saved = normalizeBiz((res && res[0]) || nb); S.businesses.push(saved);
+        const map = {};
+        const copy = (rows, extra) => rows.map(r => { const o = { ...r, ...extra }; delete o.user_id; map[r.id] = o.id = uid(); o.business_id = saved.id; o.created_at = new Date().toISOString(); return o; });
+        await B().insert('accounts', copy(data.accounts, { opening_balance: 0 }));
+        await B().insert('categories', copy(data.categories, {}));
+        await B().insert('products', copy(data.products, { stock: 0 }));
+        await B().insert('contacts', copy(data.contacts, {}));
+        await B().insert('budgets', copy(data.budgets, {}).map(b => ({ ...b, category_id: map[b.category_id] || null })).filter(b => b.category_id));
+        closeModal(); await openBiz(saved); return true;
+      }, 'Buku "' + name + '" siap dipakai 🎉');
+      if (!ok) busy(btn, false); } });
+}
+
+/* ---------------- HALAMAN PENGATURAN ---------------- */
+S.catTab = 'out';
+PAGES.pengaturan = {
+  html() {
+    const b = S.biz, st = b.settings, m = mods(), ns = notifSet(), th = LS.get('bk_theme', 'auto'), ac = LS.get('bk_accent', 'blue');
+    const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+    const sw = (name, on, fn) => `<label class="switch"><input type="checkbox" ${on ? 'checked' : ''} onchange="${fn}('${name}',this.checked)"><i></i></label>`;
+    const rowBtns = (edit, del) => `<div class="acts"><button class="icon-btn" title="Ubah" onclick="${edit}">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="${del}">${ic('trash')}</button></div>`;
+    const catCount = id => S.d.transactions.filter(t => t.category_id === id).length;
+    return `<div class="grid g2" style="align-items:start">
+    <div class="grid" style="align-content:start">
+      <div class="card"><div class="card-h"><h3>🏪 Profil Usaha</h3><button class="btn sm" onclick="go('usaha')">${ic('store')} Semua usaha</button></div><form id="bizF" onsubmit="event.preventDefault();saveBiz()">
+        <div class="f-row" style="grid-template-columns:80px 1fr"><label class="f"><span>Ikon</span><input class="inp" name="emoji" value="${esc(st.emoji || '')}" maxlength="4" style="text-align:center;font-size:20px"></label><label class="f"><span>Nama usaha</span><input class="inp" name="name" value="${esc(b.name)}" required></label></div>
+        <div class="f-row"><label class="f"><span>Template jenis usaha</span><select class="inp" name="type">${Object.entries(TEMPLATES).map(([k, t]) => `<option value="${k}" ${b.type === k ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}</select></label>
+          <label class="f"><span>Nama jenis usaha (bebas)</span><input class="inp" name="type_label" value="${esc(st.typeLabel || '')}" placeholder="cth: Ternak Bebek"></label></div>
+        <div class="f-row"><label class="f"><span>Zona waktu</span><select class="inp" name="tz">${Object.entries(TIMEZONES).map(([k, v]) => `<option value="${k}" ${(st.tz || 'Asia/Jakarta') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="f"><span>Target omzet / bulan</span>${moneyInput('target', st.target)}</label></div>
+        <div class="f-row"><label class="f"><span>No HP usaha</span><input class="inp" name="phone" value="${esc(b.phone || '')}"></label><label class="f"><span>Alamat (tampil di struk)</span><input class="inp" name="address" value="${esc(b.address || '')}"></label></div>
+        <button class="btn primary">${ic('check')} Simpan Profil</button></form></div>
+
+      <div class="card"><div class="card-h"><h3>🧩 Fitur yang Ditampilkan</h3></div>${Object.entries(MODULES).map(([k, [l, d]]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, m[k], 'setMod')}</div>`).join('')}</div>
+
+      <div class="card" id="set-sec"><div class="card-h"><h3>🛡️ Keamanan & Privasi</h3></div>
+        ${secBadge()}
+        <p class="xs muted" style="margin:10px 0 4px">${S.mode === 'cloud' ? 'Data dikirim lewat koneksi HTTPS terenkripsi dan dilindungi Row Level Security di Supabase — hanya akun Anda yang bisa membaca & mengubah data usaha ini.' : 'Mode lokal: data hanya ada di browser perangkat ini. Lakukan backup rutin.'}</p>
+        <div class="set-row"><div class="t grow"><b>Kunci aplikasi dengan PIN</b><small>${Lock.enabled() ? 'Aktif di perangkat ini 🔒' : 'Minta PIN 4 digit setiap aplikasi dibuka'}</small></div>${Lock.enabled() ? `<div class="row gap-s"><button class="btn sm" onclick="pinAction('change')">Ubah</button><button class="btn sm danger" onclick="pinAction('off')">Matikan</button></div>` : `<button class="btn sm primary" onclick="pinAction('on')">${ic('lock')} Aktifkan</button>`}</div>
+        ${Lock.enabled() ? `<div class="set-row"><div class="t grow"><b>Kunci otomatis</b><small>Saat aplikasi ditinggalkan / di-minimize</small></div><select class="inp" style="width:auto" onchange="LS.set('bk_lock_after',Number(this.value));toast('Disimpan')">${[[0, 'Langsung'], [1, '1 menit'], [5, '5 menit'], [15, '15 menit'], [-1, 'Hanya saat dibuka']].map(([v, l]) => `<option value="${v}" ${Number(LS.get('bk_lock_after', 1)) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+        <div class="set-row"><div class="t grow"><b>Sembunyikan nominal</b><small>Saldo & angka diburamkan (tombol 👁 di atas)</small></div><label class="switch"><input type="checkbox" ${LS.get('bk_privacy', false) ? 'checked' : ''} onchange="togglePrivacy()"><i></i></label></div>
+        ${S.mode === 'cloud' ? `<div class="set-row"><div class="t grow"><b>Keluar dari semua perangkat</b><small>Akhiri semua sesi login akun ini</small></div><button class="btn sm danger" onclick="logout(true)">${ic('logout')} Keluar semua</button></div>` : ''}</div>
+
+      <div class="card" id="set-notif"><div class="card-h"><h3>🔔 Notifikasi & Pengingat</h3></div>
+        <div class="set-row"><div class="t grow"><b>Notifikasi perangkat (pop-up HP/PC)</b><small>${perm === 'granted' ? 'Izin diberikan ✅' : perm === 'denied' ? 'Diblokir — buka pengaturan browser/HP untuk mengizinkan' : perm === 'unsupported' ? 'Tidak didukung browser ini — install aplikasi dulu' : 'Belum diizinkan'}</small></div>${ns.push && perm === 'granted' ? sw('push', true, 'setNotif') : `<button class="btn sm primary" onclick="enablePush()">Aktifkan</button>`}</div>
+        <p class="xs muted" style="margin:10px 0 2px">Pilih pemberitahuan yang ingin ditampilkan:</p>
+        ${[['stok', 'Stok menipis / habis', 'Saat stok ≤ batas minimum produk'], ['piutang', 'Piutang jatuh tempo', 'Tagihan pelanggan mendekati / lewat tempo'], ['hutang', 'Hutang jatuh tempo', 'Kewajiban bayar mendekati / lewat tempo'], ['anggaran', 'Anggaran hampir habis', 'Pengeluaran kategori ≥ 80% batas'], ['target', 'Target omzet tercapai', 'Kabar gembira saat target bulanan tercapai'], ['catat', 'Pengingat catat transaksi', 'Jika belum ada transaksi hari ini'], ['harian', 'Pengingat catatan harian', 'Jika data produksi hari ini belum diisi'], ['ringkasan', 'Ringkasan harian', 'Total masuk & keluar setiap hari']].map(([k, l, d]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, ns[k], 'setNotif')}</div>`).join('')}
+        <div class="f-row mt"><label class="f"><span>Jam pengingat harian</span><input class="inp" type="time" value="${ns.jam}" onchange="setNotif('jam',this.value)"></label><label class="f"><span>Ingatkan jatuh tempo (hari sebelum)</span><input class="inp" type="number" min="0" max="30" value="${ns.hari_jatuh_tempo}" onchange="setNotif('hari_jatuh_tempo',Number(this.value))"></label></div>
+        <button class="btn sm" onclick="testNotif()">🔔 Kirim notifikasi uji</button>
+        <p class="xs muted">${serverPush() ? '☁️ Push server aktif: pengingat dikirim dari server setiap 15 menit dan tetap muncul walau aplikasi ditutup.' : S.mode === 'cloud' ? 'Setelah diaktifkan, pengingat dikirim dari server dan tetap muncul walau aplikasi ditutup.' : 'Mode lokal: notifikasi diperiksa saat aplikasi dibuka & setiap 5 menit selama aplikasi berjalan.'}</p></div>
+    </div>
+
+    <div class="grid" style="align-content:start">
+      <div class="card"><div class="card-h"><h3>🎨 Tampilan</h3></div>
+        <p class="xs muted" style="margin:0 0 8px">Warna tema</p>
+        <div class="swatches mb">${[['blue', 'Biru Profesional', 'linear-gradient(135deg,#1e3a8a,#1d4ed8 50%,#0ea5e9)'], ['green', 'Hijau Emerald', 'linear-gradient(135deg,#064e3b,#047857 50%,#14b8a6)'], ['gold', 'Dark Mewah', 'linear-gradient(135deg,#0c0a08,#2b2218 45%,#b8860b)']].map(([k, l, g]) => `<button class="swatch ${ac === k ? 'on' : ''}" style="background:${g}" onclick="setAccent('${k}')${k === 'gold' && th !== 'dark' ? ";setTheme('dark')" : ''}">${ac === k ? '✓ ' : ''}${l}</button>`).join('')}</div>
+        <p class="xs muted" style="margin:0 0 8px">Mode</p>
+        <div class="seg">${[['auto', '🌗 Otomatis'], ['light', '☀️ Terang'], ['dark', '🌙 Gelap']].map(([k, l]) => `<button class="${th === k ? 'on' : ''}" onclick="setTheme('${k}')">${l}</button>`).join('')}</div>
+        <button class="btn block install-btn ${isStandalone() ? 'hidden' : ''}" onclick="installApp()">${ic('install')} Install aplikasi ke perangkat ini</button></div>
+
+      <div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div>
+        ${S.d.accounts.map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><span class="xs muted">Saldo <span class="num">${money(accBalance(a))}</span></span></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')}</div>
+
+      <div class="card"><div class="card-h"><h3>🏷️ Kategori</h3><button class="btn sm primary" onclick="catForm(null,S.catTab)">${ic('plus')} Kategori</button></div>
+        <div class="seg"><button class="${S.catTab === 'in' ? 'on in' : ''}" onclick="S.catTab='in';render()">⬆ Pemasukan (${cats('in').length})</button><button class="${S.catTab === 'out' ? 'on out' : ''}" onclick="S.catTab='out';render()">⬇ Pengeluaran (${cats('out').length})</button></div>
+        ${cats(S.catTab).map(c => `<div class="opt-row"><span class="av" style="width:38px;height:38px;font-size:17px;background:${c.color || '#888'}26">${esc(c.icon || '🏷️')}</span><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(c.name)}</b><span class="xs muted">${catCount(c.id)} transaksi</span></div>${rowBtns(`catForm('${c.id}')`, `deleteCat('${c.id}')`)}</div>`).join('') || '<p class="muted small">Belum ada kategori.</p>'}</div>
+
+      ${listsCard()}
+
+      <div class="card"><div class="card-h"><h3>📋 Kolom Catatan Harian</h3><button class="btn sm primary" onclick="metricForm()">${ic('plus')} Kolom</button></div>
+        ${metrics().length ? metrics().map((x, i) => `<div class="opt-row"><span class="av" style="width:38px;height:38px;font-size:16px">📈</span><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(x.label)}</b><span class="xs muted">${esc(x.unit)} • ${x.agg === 'last' ? 'nilai terakhir' : x.agg === 'avg' ? 'rata-rata' : 'dijumlahkan'}</span></div>${rowBtns(`metricForm(${i})`, `delMetric(${i})`)}</div>`).join('') : '<p class="muted small">Belum ada. Contoh: produksi telur, pakan, panen, porsi terjual.</p>'}</div>
+
+      <div class="card"><div class="card-h"><h3>🗄️ Data & Akun</h3></div>
+        <div class="row wrap"><button class="btn sm" onclick="backup()">${ic('download')} Backup (JSON)</button><label class="btn sm">${ic('upload')} Pulihkan<input type="file" accept=".json,application/json" hidden onchange="restore(this.files[0])"></label><button class="btn sm" onclick="exportCSV(S.d.transactions.slice().sort(sortTx),'semua-transaksi')">${ic('download')} Semua transaksi (CSV)</button></div>
+        ${S.mode === 'local' ? `<div class="set-row mt"><div class="t grow"><b>📱 Mode Lokal</b><small>Data hanya ada di perangkat ini</small></div><button class="btn sm" onclick="LS.del('bk_mode');location.reload()">Hubungkan Cloud</button></div>` : `<div class="set-row mt"><div class="t grow"><b>Akun</b><small>${esc(S.user && S.user.email)}</small></div><button class="btn sm" onclick="logout()">${ic('logout')} Keluar</button></div>`}
+        <div class="alert-item lv-danger mt" style="cursor:default;flex-direction:column"><b>Zona berbahaya</b><small>Tindakan di bawah tidak bisa dibatalkan.</small><div class="row wrap" style="margin-top:8px"><button class="btn sm danger" onclick="clearData()">Kosongkan data transaksi</button><button class="btn sm danger solid" onclick="deleteBiz()">${ic('trash')} Hapus usaha ini</button></div></div></div>
+    </div></div>`;
+  }
+};
+function listsCard() {
+  const k = S.setTab || 'units', items = listItems(k), [label, e, word] = LIST_META[k];
+  return `<div class="card" id="set-lists"><div class="card-h"><h3>📝 Daftar Pilihan</h3><button class="btn sm ghost" onclick="listReset('${k}')">Kembalikan bawaan</button></div>
+    <div class="chips mb">${Object.entries(LIST_META).map(([key, [l, em]]) => `<button class="chip ${k === key ? 'on' : ''}" onclick="S.setTab='${key}';render();setTimeout(()=>{const x=document.getElementById('set-lists');x&&x.scrollIntoView({block:'nearest'})},60)">${em} ${l}</button>`).join('')}</div>
+    <form class="row mb" onsubmit="event.preventDefault();listAdd('${k}',this.v.value)"><input class="inp" name="v" placeholder="Tambah ${word} baru…" maxlength="40"><button class="btn primary" aria-label="Tambah">${ic('plus')}</button></form>
+    ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
 }
 
 /* jalankan */
