@@ -59,7 +59,8 @@ const numf = (n, d = 0) => N(n).toLocaleString('id-ID', { maximumFractionDigits:
 const parseMoney = v => Number(String(v ?? '').replace(/[^\d]/g, '')) || 0;
 const mval = n => N(n) ? Math.round(N(n)).toLocaleString('id-ID') : '';
 function mfmt(el) { const v = el.value.replace(/\D/g, ''); el.value = v ? Number(v).toLocaleString('id-ID') : ''; }
-const moneyInput = (name, val, extra = '') => `<input class="inp num" name="${name}" inputmode="numeric" autocomplete="off" oninput="mfmt(this)" value="${mval(val)}" placeholder="0" ${extra}>`;
+/* input nominal Rupiah: otomatis titik ribuan. `after` = kode JS tambahan yang dijalankan setiap kali diketik */
+const moneyInput = (name, val, extra = '', after = '') => `<input class="inp num" name="${name}" inputmode="numeric" autocomplete="off" oninput="mfmt(this);${after}" value="${mval(val)}" placeholder="0" ${extra}>`;
 const formObj = f => Object.fromEntries(new FormData(f));
 const pct = (a, b) => b ? (a / b * 100) : 0;
 const initials = s => (String(s || '?').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('') || '•').toUpperCase();
@@ -272,11 +273,13 @@ function accBalance(a, upto) {
 }
 const totalBalance = () => sum(S.d.accounts, a => accBalance(a));
 const debtLeft = d => Math.max(0, N(d.amount) - N(d.paid));
+/* transaksi pembayaran hutang/piutang (bukan transaksi pencairan pinjaman) */
+const isDebtPay = t => { if (t.ref !== 'debt') return false; const d = byId('debts', t.debt_id); return !d || (d.kind === 'piutang' ? t.type === 'in' : t.type === 'out'); };
 const openDebts = kind => S.d.debts.filter(d => d.kind === kind && debtLeft(d) > 0.5);
 function txTitle(t) {
   if (t.type === 'transfer') return 'Transfer Saldo';
   const c = cat(t.category_id);
-  if (t.ref === 'debt') { const d = byId('debts', t.debt_id); return (t.type === 'in' ? 'Terima ' : 'Bayar ') + (d ? (d.kind === 'piutang' ? 'Piutang' : 'Hutang') : 'Hutang/Piutang'); }
+  if (t.ref === 'debt') { const d = byId('debts', t.debt_id); if (!isDebtPay(t)) return d && d.kind === 'hutang' ? 'Pinjaman Diterima' : 'Pinjaman Diberikan'; return (t.type === 'in' ? 'Terima ' : 'Bayar ') + (d ? (d.kind === 'piutang' ? 'Piutang' : 'Hutang') : 'Hutang/Piutang'); }
   if (t.ref === 'sale') return c ? c.name : 'Penjualan';
   if (t.ref === 'purchase') return c ? c.name : 'Pembelian Stok';
   return c ? c.name : (t.type === 'in' ? 'Pemasukan' : 'Pengeluaran');
@@ -355,6 +358,7 @@ async function boot() {
     if (!window.supabase) { screen(`<div class="auth-card">${brandHTML()}<p>Tidak bisa memuat pustaka Supabase. Periksa koneksi internet lalu muat ulang.</p><button class="btn primary block" onclick="location.reload()">Muat ulang</button><button class="btn block mt" onclick="useLocal()">Pakai Mode Lokal</button></div>`); return; }
     try { S.sb = supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } }); } catch (e) { LS.del('bk_cfg'); return showSetup('URL/kunci Supabase tidak valid.'); }
     S.mode = 'cloud';
+    S.sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => changePass(true), 400); });
     const { data } = await S.sb.auth.getSession();
     if (data && data.session) { S.user = data.session.user; return afterAuth(); }
     return showAuth();
@@ -410,10 +414,18 @@ async function doAuth(e, tab) {
   } catch (err) { busy(b, false); toast(err.message === 'Invalid login credentials' ? 'Email atau kata sandi salah' : err.message, true); }
   return false;
 }
-async function forgotPass() {
-  const email = prompt('Masukkan email akun Anda:'); if (!email) return;
-  const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-  toast(error ? error.message : 'Link reset kata sandi dikirim ke email', !!error);
+function forgotPass() {
+  modal('Lupa Kata Sandi', `<form id="fpf"><p class="small muted" style="margin-top:0">Masukkan email akun Anda. Kami kirimkan link untuk membuat kata sandi baru.</p><label class="f"><span>Email</span><input class="inp" type="email" name="email" required autofocus></label><button class="btn primary block" id="fpb">Kirim Link Reset</button></form>`,
+    { onMount: m => m.querySelector('#fpf').onsubmit = async e => { e.preventDefault(); const email = formObj(e.target).email.trim(); if (!email) return; const b = $('#fpb'); busy(b, true);
+      const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }); busy(b, false);
+      if (error) return toast(error.message, true); closeModal(); toast('Link reset kata sandi dikirim ke ' + email); } });
+}
+function changePass(recovery) {
+  modal(recovery ? 'Buat Kata Sandi Baru' : 'Ubah Kata Sandi', `<form id="cpf">${recovery ? '<p class="small muted" style="margin-top:0">Silakan buat kata sandi baru untuk akun Anda.</p>' : ''}<label class="f"><span>Kata sandi baru</span><input class="inp" type="password" name="p1" minlength="6" autocomplete="new-password" required autofocus></label><label class="f"><span>Ulangi kata sandi baru</span><input class="inp" type="password" name="p2" minlength="6" autocomplete="new-password" required></label><button class="btn primary block" id="cpb">Simpan Kata Sandi</button></form>`,
+    { onMount: m => m.querySelector('#cpf').onsubmit = async e => { e.preventDefault(); const f = formObj(e.target);
+      if (f.p1.length < 6) return toast('Minimal 6 karakter', true); if (f.p1 !== f.p2) return toast('Kata sandi tidak sama', true);
+      const b = $('#cpb'); busy(b, true); const { error } = await S.sb.auth.updateUser({ password: f.p1 }); busy(b, false);
+      if (error) return toast(error.message, true); closeModal(); toast('Kata sandi berhasil diperbarui 🔐'); } });
 }
 async function logout(all) {
   confirmBox(all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?', async () => {
@@ -862,7 +874,7 @@ function txForm(id, type = 'in', preset = {}) {
   const title = t ? 'Detail Transaksi' : type === 'in' ? 'Catat Pemasukan' : type === 'out' ? 'Catat Pengeluaran' : 'Transfer Saldo';
   const body = `<form id="txf">
     ${!t ? `<div class="seg"><button type="button" class="${type === 'in' ? 'on in' : ''}" onclick="txForm(null,'in')">⬆ Pemasukan</button><button type="button" class="${type === 'out' ? 'on out' : ''}" onclick="txForm(null,'out')">⬇ Pengeluaran</button><button type="button" class="${type === 'transfer' ? 'on' : ''}" onclick="txForm(null,'transfer')">🔁 Transfer</button></div>` : `<div class="row mb"><span class="pill ${type === 'in' ? 'in' : type === 'out' ? 'out' : 'info'}">${type === 'in' ? 'Pemasukan' : type === 'out' ? 'Pengeluaran' : 'Transfer'}</span>${t.ref ? `<span class="pill neutral">${t.ref === 'sale' ? 'Penjualan kasir' : t.ref === 'purchase' ? 'Pembelian stok' : 'Hutang/Piutang'}</span>` : ''}</div>`}
-    ${t && t.items ? `<div class="card mb" style="background:var(--surface-2);padding:12px">${t.items.map(i => `<div class="row between small"><span>${esc(i.name)} × ${numf(i.qty, 2)}</span><b class="num">${money(N(i.qty) * N(i.price))}</b></div>`).join('')}${N(t.disc) ? `<div class="row between small muted"><span>Diskon</span><span>−${money(t.disc)}</span></div>` : ''}${t.ref === 'sale' ? `<div class="row between xs muted" style="margin-top:6px"><span>Modal (HPP)</span><span>${money(t.cost)} • laba ${money(N(t.amount) - N(t.cost))}</span></div>` : ''}</div>` : ''}
+    ${t && t.items ? `<div class="card mb" style="background:var(--surface-2);padding:12px">${t.items.map(i => `<div class="row between small"><span>${esc(i.name)} × ${numf(i.qty, 2)}</span><b class="num">${money(N(i.qty) * N(i.price))}</b></div>`).join('')}${sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount) > 0 ? `<div class="row between small muted"><span>Diskon</span><span>−${money(sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount))}</span></div>` : ''}${t.ref === 'sale' ? `<div class="row between xs muted" style="margin-top:6px"><span>Modal (HPP)</span><span>${money(t.cost)} • laba ${money(N(t.amount) - N(t.cost))}</span></div>` : ''}</div>` : ''}
     <label class="f"><span>Jumlah</span><input class="inp big num ${type === 'in' ? 'c-in' : type === 'out' ? 'c-out' : ''}" name="amount" inputmode="numeric" oninput="mfmt(this)" value="${mval(v.amount)}" placeholder="0" ${lockAmt ? 'readonly' : ''} autofocus></label>
     ${type !== 'transfer' ? `<label class="f"><span>Kategori</span></label><input type="hidden" name="category_id" value="${v.category_id || ''}">
       <div class="cat-grid" id="catGrid">${cl.map(c => catOpt(c, v.category_id)).join('')}<div class="cat-opt" onclick="quickCat('${type}')"><span class="e">➕</span>Baru</div></div>` : ''}
@@ -880,14 +892,23 @@ function txForm(id, type = 'in', preset = {}) {
 }
 const catOpt = (c, sel) => `<div class="cat-opt ${sel === c.id ? 'on' : ''}" data-id="${c.id}" onclick="pickCat(this)"><span class="e">${esc(c.icon || '🏷️')}</span><span class="ell" style="display:block">${esc(c.name)}</span></div>`;
 function pickCat(el) { $$('#catGrid .cat-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#txf [name=category_id]').value = el.dataset.id; }
-async function quickCat(type) {
-  const name = prompt('Nama kategori ' + (type === 'in' ? 'pemasukan' : 'pengeluaran') + ' baru:'); if (!name || !name.trim()) return;
-  const c = await safe(() => add('categories', { name: name.trim(), type, icon: type === 'in' ? '💰' : '🧾', color: PALETTE[S.d.categories.length % 12] })); if (!c) return;
-  const g = $('#catGrid'); g.insertAdjacentHTML('afterbegin', catOpt(c)); pickCat(g.firstElementChild);
+function quickCat(type) {
+  const g = $('#catGrid'); if (!g || $('#qcBox')) return $('#qcBox input') && $('#qcBox input').focus();
+  g.insertAdjacentHTML('beforebegin', `<div class="row mb" id="qcBox"><input class="inp" placeholder="Nama kategori ${type === 'in' ? 'pemasukan' : 'pengeluaran'} baru" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();quickCatSave('${type}')}"><button type="button" class="btn primary" onclick="quickCatSave('${type}')">${ic('check')}</button><button type="button" class="btn" onclick="$('#qcBox').remove()">${ic('x')}</button></div>`);
+  $('#qcBox input').focus();
+}
+async function quickCatSave(type) {
+  const inp = $('#qcBox input'), name = inp.value.trim(); if (!name) return inp.focus();
+  if (cats(type).some(c => c.name.toLowerCase() === name.toLowerCase())) return toast('Kategori "' + name + '" sudah ada', true);
+  const c = await safe(() => add('categories', { name, type, icon: type === 'in' ? '💰' : '🧾', color: PALETTE[S.d.categories.length % 12] })); if (!c) return;
+  $('#qcBox').remove(); const g = $('#catGrid'); g.insertAdjacentHTML('afterbegin', catOpt(c)); pickCat(g.firstElementChild); toast('Kategori ditambahkan');
 }
 async function saveTx(id, type) {
   const f = formObj($('#txf')), t = id ? byId('transactions', id) : null, amount = parseMoney(f.amount);
   if (!amount) return toast('Isi jumlah transaksi', true);
+  if (!f.date) return toast('Isi tanggal transaksi', true);
+  if (!f.account_id) return toast('Pilih akun', true);
+  if (t && t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d && N(d.paid) + amount - N(t.amount) > N(d.amount) + 0.5) return toast('Melebihi total ' + (d.kind === 'piutang' ? 'piutang' : 'hutang') + ' (' + money(d.amount) + ')', true); }
   if (type !== 'transfer' && !f.category_id) return toast('Pilih kategori', true);
   if (type === 'transfer' && f.account_id === f.to_account_id) return toast('Akun asal dan tujuan harus berbeda', true);
   const row = { date: f.date, type, amount, account_id: f.account_id, note: f.note.trim(), category_id: type === 'transfer' ? null : f.category_id, to_account_id: type === 'transfer' ? f.to_account_id : null, contact_id: f.contact_id || null };
@@ -895,7 +916,7 @@ async function saveTx(id, type) {
   const ok = await safe(async () => {
     if (t) {
       if (t.ref === 'sale' || t.ref === 'purchase') { delete row.amount; delete row.type; }
-      if (t.ref === 'debt' && t.debt_id && amount !== N(t.amount)) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) + amount - N(t.amount)) }); }
+      if (t.ref === 'debt' && t.debt_id && amount !== N(t.amount)) { const d = byId('debts', t.debt_id); if (d && isDebtPay(t)) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) + amount - N(t.amount)) }); }
       if (t.ref === 'debt') row.category_id = t.category_id;
       await upd('transactions', t.id, row);
     } else await add('transactions', row);
@@ -905,14 +926,14 @@ async function saveTx(id, type) {
 }
 function deleteTx(id) {
   const t = byId('transactions', id); if (!t) return;
-  const note = t.ref === 'sale' ? ' Stok barang akan dikembalikan.' : t.ref === 'purchase' ? ' Stok barang akan dikurangi kembali.' : t.ref === 'debt' ? ' Sisa hutang/piutang akan bertambah lagi.' : '';
+  const note = t.ref === 'sale' ? ' Stok barang akan dikembalikan.' : t.ref === 'purchase' ? ' Stok barang akan dikurangi kembali.' : t.ref === 'debt' && isDebtPay(t) ? ' Sisa hutang/piutang akan bertambah lagi.' : '';
   confirmBox('Hapus transaksi <b>' + esc(txTitle(t)) + '</b> sebesar <b>' + money(t.amount) + '</b>?' + note, async () => {
     await safe(async () => {
       if ((t.ref === 'sale' || t.ref === 'purchase') && t.items) {
         for (const it of t.items) { const p = prod(it.pid); if (p && p.track_stock !== false) await upd('products', p.id, { stock: N(p.stock) + (t.ref === 'sale' ? 1 : -1) * N(it.qty) }); }
         for (const mv of S.d.stock_moves.filter(x => x.transaction_id === t.id)) await del('stock_moves', mv.id);
       }
-      if (t.ref === 'debt' && t.debt_id) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) - N(t.amount)) }); }
+      if (t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) - N(t.amount)) }); }
       await del('transactions', id);
     }, 'Transaksi dihapus');
     render();
@@ -931,7 +952,7 @@ PAGES.kasir = {
         ${groups.length ? `<div class="chips mb"><button class="chip ${!S.kasir.grp ? 'on' : ''}" onclick="S.kasir.grp='';render()">Semua</button>${groups.map(g => `<button class="chip ${S.kasir.grp === g ? 'on' : ''}" data-g="${esc(g)}" onclick="S.kasir.grp=this.dataset.g;render()">${esc(g)}</button>`).join('')}</div>` : ''}
         <div class="pgrid" id="pgrid"></div>
       </div>
-      <div class="card cart"><div class="card-h"><h3>🛒 Keranjang</h3><button class="btn sm ghost" onclick="S.cart=[];renderCart()">Kosongkan</button></div><div id="cartBox"></div></div>
+      <div class="card cart"><div class="card-h"><h3>🛒 Keranjang</h3><button class="btn sm danger" id="cartClear" onclick="cartClear()">${ic('trash')} Batalkan</button></div><div id="cartBox"></div></div>
     </div>
     <div class="cart-bar" id="cartBar" onclick="checkoutForm()"></div>`;
   },
@@ -942,82 +963,115 @@ function renderPGrid() {
   const ps = S.d.products.filter(p => p.active !== false && (!S.kasir.grp || p.group_name === S.kasir.grp) && (!q || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
   const g = $('#pgrid'); if (!g) return;
   g.innerHTML = ps.length ? ps.map(p => { const inCart = S.cart.find(c => c.pid === p.id); const low = p.track_stock !== false && N(p.stock) <= N(p.min_stock);
-    return `<div class="pcard ${low ? 'low' : ''}" onclick="cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? 'Stok ' + numf(p.stock, 2) + ' ' + esc(p.unit || '') : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
+    return `<div class="pcard ${low ? 'low' : ''}" role="button" tabindex="0" onclick="cartAdd('${p.id}')" onkeydown="if(event.key==='Enter')cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? (N(p.stock) <= 0 ? 'Stok habis' : 'Stok ' + numf(p.stock, 2) + ' ' + esc(p.unit || '')) : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
     : `<div class="empty" style="grid-column:1/-1"><div class="e">📦</div><p>${S.d.products.length ? 'Produk tidak ditemukan.' : 'Belum ada produk.'}</p><button class="btn primary sm" onclick="productForm()">${ic('plus')} Tambah Produk</button></div>`;
 }
 const cartTotal = () => sum(S.cart, c => N(c.qty) * N(c.price));
+function cartChanged() { renderCart(); renderPGrid(); if ($('#coItems')) { if (!S.cart.length) { closeModal(); toast('Keranjang dikosongkan'); } else { $('#coItems').innerHTML = coItemsHTML(); coCalc(); } } }
 function cartAdd(pid) {
   const p = prod(pid); if (!p) return; const c = S.cart.find(x => x.pid === pid);
   if (c) c.qty = N(c.qty) + 1; else S.cart.push({ pid, name: p.name, price: N(p.sell_price), cost: N(p.buy_price), qty: 1, unit: p.unit });
   const q = (c || S.cart[S.cart.length - 1]).qty;
   if (p.track_stock !== false && q > N(p.stock)) toast('⚠️ Stok ' + p.name + ' tidak mencukupi (sisa ' + numf(p.stock, 2) + ')', true);
   if (navigator.vibrate) navigator.vibrate(12);
-  renderCart(); renderPGrid();
+  cartChanged();
 }
-function cartSet(i, v) { v = Number(String(v).replace(',', '.')); if (!(v > 0)) S.cart.splice(i, 1); else S.cart[i].qty = v; renderCart(); renderPGrid(); }
+function cartSet(i, v) { if (!S.cart[i]) return; v = Number(String(v).replace(',', '.')); if (!(v > 0)) S.cart.splice(i, 1); else S.cart[i].qty = Math.round(v * 1000) / 1000; cartChanged(); }
+function cartStep(i, d) { if (!S.cart[i]) return; cartSet(i, N(S.cart[i].qty) + d); }
+function cartDel(i) { if (!S.cart[i]) return; const n = S.cart[i].name; S.cart.splice(i, 1); cartChanged(); toast('"' + n + '" dihapus dari keranjang'); }
+function cartPrice(i, v) { if (!S.cart[i]) return; S.cart[i].price = parseMoney(v); renderCart(); if ($('#coItems')) { const el = $('#coSub' + i); if (el) el.textContent = money(N(S.cart[i].qty) * N(S.cart[i].price)); coCalc(); } }
+function cartClear() { if (!S.cart.length) return toast('Keranjang sudah kosong'); confirmBox('Batalkan transaksi ini dan kosongkan keranjang (' + S.cart.length + ' item)?', () => { S.cart = []; cartChanged(); }, 'Ya, batalkan'); }
 function renderCart() {
   const box = $('#cartBox'), bar = $('#cartBar'), tot = cartTotal(), n = S.cart.length;
-  if (box) box.innerHTML = n ? `<div class="cart-items">${S.cart.map((c, i) => `<div class="ci"><div class="grow"><div class="ell" style="font-weight:700;font-size:13.5px">${esc(c.name)}</div><div class="xs muted num">${money(c.price)} / ${esc(c.unit || 'item')}</div></div>
-      <div class="qty"><button onclick="cartSet(${i},${N(c.qty) - 1})">−</button><input value="${c.qty}" inputmode="decimal" onchange="cartSet(${i},this.value)"><button onclick="cartSet(${i},${N(c.qty) + 1})">+</button></div>
-      <b class="num" style="min-width:76px;text-align:right;font-size:13.5px">${money(N(c.qty) * N(c.price))}</b></div>`).join('')}</div>
+  if (box) box.innerHTML = n ? `<div class="cart-items">${S.cart.map((c, i) => `<div class="ci"><button class="icon-btn" style="width:30px;height:30px;color:var(--out)" title="Hapus item" aria-label="Hapus ${esc(c.name)}" onclick="cartDel(${i})">${ic('x')}</button><div class="grow" style="min-width:0"><div class="ell" style="font-weight:700;font-size:13.5px">${esc(c.name)}</div><div class="xs muted num">${money(c.price)} / ${esc(c.unit || 'item')}</div></div>
+      <div class="qty"><button type="button" onclick="cartStep(${i},-1)" aria-label="Kurangi">−</button><input value="${c.qty}" inputmode="decimal" aria-label="Jumlah" onchange="cartSet(${i},this.value)"><button type="button" onclick="cartStep(${i},1)" aria-label="Tambah">+</button></div>
+      <b class="num" style="min-width:72px;text-align:right;font-size:13px">${money(N(c.qty) * N(c.price))}</b></div>`).join('')}</div>
       <div class="total-line"><span>Total</span><span class="num">${money(tot)}</span></div><button class="btn primary block" onclick="checkoutForm()">${ic('check')} Bayar</button>`
     : `<div class="empty"><div class="e">🛒</div><p class="small">Ketuk produk untuk menambah ke keranjang.</p></div>`;
+  const cb = $('#cartClear'); if (cb) cb.disabled = !n;
   if (bar) { bar.style.display = n ? '' : 'none'; bar.innerHTML = `${ic('cart')}<span class="grow">${n} item</span><b class="num">${money(tot)}</b><span>Bayar ›</span>`; }
 }
 function manualItem() {
-  modal('Item Manual', `<form id="mif"><label class="f"><span>Nama item / jasa</span><input class="inp" name="name" required autofocus></label><div class="f-row"><label class="f"><span>Harga</span>${moneyInput('price', '')}</label><label class="f"><span>Jumlah</span><input class="inp" name="qty" type="number" step="any" value="1"></label></div><button class="btn primary block">Tambah ke Keranjang</button></form>`,
-    { onMount: m => m.querySelector('#mif').onsubmit = e => { e.preventDefault(); const f = formObj(e.target); S.cart.push({ pid: null, name: f.name, price: parseMoney(f.price), cost: 0, qty: N(f.qty) || 1, unit: 'item' }); closeModal(); renderCart(); } });
+  modal('Item Manual', `<form id="mif"><label class="f"><span>Nama item / jasa</span><input class="inp" name="name" required autofocus></label><div class="f-row"><label class="f"><span>Harga</span>${moneyInput('price', '')}</label><label class="f"><span>Jumlah</span><input class="inp" name="qty" type="number" step="any" min="0" value="1"></label></div><button class="btn primary block">Tambah ke Keranjang</button></form>`,
+    { onMount: m => m.querySelector('#mif').onsubmit = e => { e.preventDefault(); const f = formObj(e.target); if (!f.name.trim()) return toast('Isi nama item', true); if (!parseMoney(f.price)) return toast('Isi harga item', true); S.cart.push({ pid: null, name: f.name.trim(), price: parseMoney(f.price), cost: 0, qty: N(f.qty) > 0 ? N(f.qty) : 1, unit: 'item' }); closeModal(); cartChanged(); } });
 }
 const saleCategory = () => cats('in').find(c => c.id === S.biz.settings.sale_cat) || cats('in')[0];
+function coItemsHTML() {
+  return S.cart.map((c, i) => `<div class="ci"><button type="button" class="icon-btn" style="width:30px;height:30px;color:var(--out)" title="Hapus item" aria-label="Hapus ${esc(c.name)}" onclick="cartDel(${i})">${ic('x')}</button>
+    <div class="grow" style="min-width:0"><div class="ell" style="font-weight:700;font-size:13.5px">${esc(c.name)}</div><input class="inp num" style="padding:5px 8px;font-size:13px;margin-top:4px;max-width:130px" inputmode="numeric" value="${mval(c.price)}" aria-label="Harga" oninput="mfmt(this);cartPrice(${i},this.value)"></div>
+    <div class="qty"><button type="button" onclick="cartStep(${i},-1)">−</button><input value="${c.qty}" inputmode="decimal" onchange="cartSet(${i},this.value)"><button type="button" onclick="cartStep(${i},1)">+</button></div>
+    <b class="num" id="coSub${i}" style="min-width:70px;text-align:right;font-size:13px">${money(N(c.qty) * N(c.price))}</b></div>`).join('');
+}
 function checkoutForm() {
   if (!S.cart.length) return toast('Keranjang masih kosong', true);
-  const tot = cartTotal(), m = mods(), sc = saleCategory();
-  const body = `<form id="cof">
-    <div class="card mb" style="background:var(--surface-2);padding:12px;max-height:160px;overflow:auto">${S.cart.map(c => `<div class="row between small"><span class="ell">${esc(c.name)} × ${numf(c.qty, 2)}</span><b class="num">${money(N(c.qty) * N(c.price))}</b></div>`).join('')}</div>
-    <div class="f-row"><label class="f"><span>Subtotal</span><input class="inp num" value="${money(tot)}" readonly></label><label class="f"><span>Diskon</span>${moneyInput('disc', '', 'oninput="mfmt(this);coCalc()"')}</label></div>
-    <div class="total-line" style="font-size:24px"><span>Total</span><span class="num c-in" id="coTotal">${money(tot)}</span></div>
-    <label class="f"><span>Metode pembayaran</span></label><input type="hidden" name="method" value="${S.d.accounts[0] ? S.d.accounts[0].id : ''}">
-    <div class="pay-opts">${S.d.accounts.map((a, i) => `<div class="pay-opt ${i === 0 ? 'on' : ''}" data-v="${a.id}" data-kas="${a.type === 'kas' ? 1 : 0}" onclick="coPay(this)">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'} ${esc(a.name)}</div>`).join('')}${m.hutang ? `<div class="pay-opt" data-v="credit" onclick="coPay(this)">📝 Bayar Nanti</div>` : ''}</div>
-    <div id="coCash"><label class="f"><span>Uang diterima</span>${moneyInput('cash', '', 'oninput="mfmt(this);coCalc()"')}</label><div class="quick-cash" id="qcash"></div><div class="row between mb"><span class="muted">Kembalian</span><b class="num" id="coChange" style="font-size:18px">-</b></div></div>
+  if (!S.d.accounts.length) return toast('Tambahkan akun kas/bank dulu di Pengaturan', true);
+  if (!cats('in').length) return toast('Tambahkan kategori pemasukan dulu di Pengaturan', true);
+  const m = mods(), sc = saleCategory(), first = S.d.accounts.find(a => a.type === 'kas') || S.d.accounts[0];
+  const body = `<form id="cof" onsubmit="event.preventDefault()">
+    <div class="row between mb"><b class="small">Rincian pesanan</b><button type="button" class="btn sm ghost" onclick="closeModal();manualItem()">${ic('plus')} Item</button></div>
+    <div id="coItems" class="mb" style="max-height:240px;overflow:auto">${coItemsHTML()}</div>
+    <div class="row between small"><span class="muted">Subtotal</span><b class="num" id="coSubtotal"></b></div>
+    <label class="f mt"><span>Diskon</span></label><input type="hidden" name="disc_mode" value="rp">
+    <div class="row mb" style="gap:8px"><div class="seg" style="margin:0;flex:none;width:110px"><button type="button" class="on" data-m="rp" onclick="coDiscMode(this)">Rp</button><button type="button" data-m="pct" onclick="coDiscMode(this)">%</button></div>${moneyInput('disc', '', 'aria-label="Diskon"', 'coCalc()')}</div>
+    <div class="chips" style="margin-top:-6px">${[5, 10, 15, 20].map(p => `<button type="button" class="chip" onclick="coDiscQuick(${p})">${p}%</button>`).join('')}<button type="button" class="chip" onclick="coDiscQuick(0)">Tanpa diskon</button></div>
+    <div class="row between small"><span class="muted">Potongan</span><b class="num c-out" id="coDiscAmt">-</b></div>
+    <div class="total-line" style="font-size:24px"><span>Total</span><span class="num c-in" id="coTotal"></span></div>
+    <label class="f"><span>Metode pembayaran</span></label><input type="hidden" name="method" value="${first.id}">
+    <div class="pay-opts">${S.d.accounts.map(a => `<div class="pay-opt ${a.id === first.id ? 'on' : ''}" role="button" tabindex="0" data-v="${a.id}" data-kas="${a.type === 'kas' ? 1 : 0}" onclick="coPay(this)">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'} ${esc(a.name)}</div>`).join('')}${m.hutang ? `<div class="pay-opt" role="button" tabindex="0" data-v="credit" onclick="coPay(this)">📝 Bayar Nanti</div>` : ''}</div>
+    <div id="coCash" class="${first.type === 'kas' ? '' : 'hidden'}"><label class="f"><span>Uang diterima</span>${moneyInput('cash', '', 'aria-label="Uang diterima"', 'coCalc()')}</label><div class="quick-cash" id="qcash"></div><div class="row between mb"><span class="muted">Kembalian</span><b class="num" id="coChange" style="font-size:18px">-</b></div></div>
     <div class="f-row"><label class="f"><span>Pelanggan</span><select class="inp" name="contact_id"><option value="">— Umum —</option>${S.d.contacts.filter(c => c.type !== 'supplier').map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
       <label class="f"><span>atau nama baru</span><input class="inp" name="new_contact" placeholder="Nama pelanggan"></label></div>
-    <div id="coDue" class="hidden"><label class="f"><span>Jatuh tempo pembayaran</span><input class="inp" type="date" name="due" value="${addDays(today(), 7)}"></label></div>
+    <div id="coDue" class="hidden"><div class="f-row"><label class="f"><span>Uang muka / DP (opsional)</span>${moneyInput('dp', '', '', 'coCalc()')}</label><label class="f"><span>Jatuh tempo</span><input class="inp" type="date" name="due" value="${addDays(today(), 7)}"></label></div>
+      <div class="f-row"><label class="f"><span>DP masuk ke</span><select class="inp" name="dp_acc">${S.d.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label><div class="f"><span class="xs muted" style="display:block;margin-bottom:7px;font-weight:700">Sisa jadi piutang</span><b class="num c-out" id="coLeft">-</b></div></div></div>
     <div class="f-row"><label class="f"><span>Kategori</span><select class="inp" name="cat">${cats('in').map(c => `<option value="${c.id}" ${sc && c.id === sc.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
-      <label class="f"><span>Tanggal</span><input class="inp" type="date" name="date" value="${today()}"></label></div>
-    <label class="f"><span>Catatan</span><input class="inp" name="note"></label></form>`;
-  modal('Pembayaran', body, { foot: `<button class="btn" onclick="closeModal()">Kembali</button><button class="btn primary" id="coBtn">${ic('check')} Selesaikan</button>`, onMount: m => { m.querySelector('#coBtn').onclick = doCheckout; coCalc(); } });
+      <label class="f"><span>Tanggal</span><input class="inp" type="date" name="date" value="${today()}" max="${addDays(today(), 1)}"></label></div>
+    <label class="f"><span>Catatan</span><input class="inp" name="note" placeholder="opsional"></label></form>`;
+  modal('Pembayaran', body, { wide: true, foot: `<button class="btn danger" onclick="cartClear()">${ic('x')} Batalkan</button><button class="btn" onclick="closeModal()">Kembali</button><button class="btn primary" id="coBtn">${ic('check')} Selesaikan</button>`, onMount: m => { m.querySelector('#coBtn').onclick = doCheckout; coCalc(); } });
 }
+function coDiscMode(el) { $$('#cof .seg button').forEach(b => b.classList.toggle('on', b === el)); $('#cof [name=disc_mode]').value = el.dataset.m; const d = $('#cof [name=disc]'); d.value = ''; d.placeholder = el.dataset.m === 'pct' ? '0 %' : '0'; d.focus(); coCalc(); }
+function coDiscQuick(p) { const btn = $$('#cof .seg button')[p ? 1 : 0]; $$('#cof .seg button').forEach(b => b.classList.toggle('on', b === btn)); $('#cof [name=disc_mode]').value = p ? 'pct' : 'rp'; $('#cof [name=disc]').value = p ? String(p) : ''; coCalc(); }
+function coDisc(f, sub) { const v = parseMoney(f.disc); return Math.min(sub, f.disc_mode === 'pct' ? Math.round(sub * Math.min(100, v) / 100) : v); }
 function coPay(el) {
-  $$('.pay-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#cof [name=method]').value = el.dataset.v;
-  $('#coCash').classList.toggle('hidden', el.dataset.kas !== '1'); $('#coDue').classList.toggle('hidden', el.dataset.v !== 'credit');
+  $$('#cof .pay-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#cof [name=method]').value = el.dataset.v;
+  $('#coCash').classList.toggle('hidden', el.dataset.kas !== '1'); $('#coDue').classList.toggle('hidden', el.dataset.v !== 'credit'); coCalc();
 }
 function coCalc() {
-  const f = formObj($('#cof')), tot = Math.max(0, cartTotal() - parseMoney(f.disc)), cash = parseMoney(f.cash);
+  const fm = $('#cof'); if (!fm) return;
+  const f = formObj(fm), sub = cartTotal(), disc = coDisc(f, sub), tot = Math.max(0, sub - disc), cash = parseMoney(f.cash), dp = Math.min(parseMoney(f.dp), tot);
+  $('#coSubtotal').textContent = money(sub); $('#coDiscAmt').textContent = disc ? '−' + money(disc) + (f.disc_mode === 'pct' && parseMoney(f.disc) ? ' (' + Math.min(100, parseMoney(f.disc)) + '%)' : '') : '-';
   $('#coTotal').textContent = money(tot);
-  $('#coChange').textContent = cash ? money(cash - tot) : '-'; $('#coChange').className = 'num ' + (cash && cash < tot ? 'c-out' : 'c-in');
+  $('#coChange').textContent = cash ? (cash >= tot ? money(cash - tot) : 'Kurang ' + money(tot - cash)) : '-'; $('#coChange').className = 'num ' + (cash && cash < tot ? 'c-out' : 'c-in');
+  if ($('#coLeft')) $('#coLeft').textContent = money(tot - dp);
   const sugg = [...new Set([tot, Math.ceil(tot / 5000) * 5000, Math.ceil(tot / 10000) * 10000, Math.ceil(tot / 50000) * 50000, Math.ceil(tot / 100000) * 100000])].filter(v => v >= tot && v > 0).slice(0, 5);
   $('#qcash').innerHTML = sugg.map((v, i) => `<button type="button" class="chip" onclick="const c=$('#cof [name=cash]');c.value='${mval(v)}';coCalc()">${i === 0 ? 'Uang pas' : short(v)}</button>`).join('');
 }
 async function doCheckout() {
-  const f = formObj($('#cof')), sub = cartTotal(), disc = parseMoney(f.disc), total = Math.max(0, sub - disc), cash = parseMoney(f.cash), method = f.method;
-  const credit = method === 'credit', a = acc(method);
+  if (!S.cart.length) return toast('Keranjang kosong', true);
+  const f = formObj($('#cof')), sub = cartTotal(), disc = coDisc(f, sub), total = Math.max(0, sub - disc), cash = parseMoney(f.cash), method = f.method;
+  const credit = method === 'credit', a = acc(method), dp = credit ? Math.min(parseMoney(f.dp), total) : 0;
+  if (S.cart.some(c => !(N(c.qty) > 0))) return toast('Jumlah item harus lebih dari 0', true);
   if (!credit && !a) return toast('Pilih metode pembayaran', true);
-  if (a && a.type === 'kas' && cash && cash < total) return toast('Uang diterima kurang dari total', true);
+  if (!f.cat) return toast('Pilih kategori pemasukan', true);
+  if (a && a.type === 'kas' && cash && cash < total) return toast('Uang diterima kurang ' + money(total - cash), true);
   if (credit && !f.contact_id && !f.new_contact.trim()) return toast('Isi nama pelanggan untuk penjualan bayar nanti', true);
+  if (credit && dp >= total) return toast('DP sama dengan total — pilih metode bayar tunai/transfer saja', true);
   const btn = $('#coBtn'); busy(btn, true);
   const items = S.cart.map(c => ({ pid: c.pid, name: c.name, qty: N(c.qty), price: N(c.price), cost: N(c.cost), unit: c.unit }));
   const cost = sum(items, i => i.qty * i.cost), date = f.date || today(), txId = uid();
   const ok = await safe(async () => {
     let cid = f.contact_id || null;
-    if (!cid && f.new_contact.trim()) cid = (await add('contacts', { name: f.new_contact.trim(), type: 'pelanggan' })).id;
-    if (credit) await add('debts', { kind: 'piutang', contact_id: cid, amount: total, paid: 0, date, due_date: f.due || null, category_id: f.cat, source: 'sale', note: 'Penjualan: ' + items.map(i => i.name + ' x' + i.qty).join(', ').slice(0, 300) });
-    else await add('transactions', { id: txId, date, type: 'in', amount: total, category_id: f.cat, account_id: method, contact_id: cid, ref: 'sale', items, cost, note: f.note.trim() + (disc ? (f.note.trim() ? ' • ' : '') + 'Diskon ' + money(disc) : '') });
+    if (!cid && f.new_contact.trim()) cid = (await add('contacts', { name: f.new_contact.trim(), type: listGet('ctypes')[0] || 'pelanggan' })).id;
+    const discNote = disc ? 'Diskon ' + money(disc) : '';
+    if (credit) {
+      const d = await add('debts', { kind: 'piutang', contact_id: cid, amount: total, paid: dp, date, due_date: f.due || null, category_id: f.cat, source: 'sale', note: ('Penjualan: ' + items.map(i => i.name + ' x' + i.qty).join(', ')).slice(0, 280) + (discNote ? ' • ' + discNote : '') });
+      if (dp) await add('transactions', { date, type: 'in', amount: dp, account_id: f.dp_acc, contact_id: cid, ref: 'debt', debt_id: d.id, category_id: f.cat, note: 'Uang muka penjualan' });
+    } else await add('transactions', { id: txId, date, type: 'in', amount: total, category_id: f.cat, account_id: method, contact_id: cid, ref: 'sale', items, cost, note: [f.note.trim(), discNote].filter(Boolean).join(' • ') });
     for (const it of items) { const p = prod(it.pid); if (!p || p.track_stock === false) continue; await upd('products', p.id, { stock: N(p.stock) - it.qty }); await add('stock_moves', { product_id: p.id, date, qty: -it.qty, kind: 'sale', note: credit ? 'Penjualan (piutang)' : 'Penjualan', transaction_id: credit ? null : txId }); }
     if (f.cat !== S.biz.settings.sale_cat) { S.biz.settings.sale_cat = f.cat; updBiz({ settings: S.biz.settings }).catch(() => {}); }
     return { cid };
   });
   busy(btn, false); if (!ok) return;
-  const rc = { items, sub, disc, total, cash, change: cash ? cash - total : 0, method: credit ? 'Bayar Nanti (Piutang)' : a.name, customer: ok.cid ? contactName(ok.cid) : 'Umum', date: new Date(), phone: ok.cid ? (contact(ok.cid) || {}).phone : '' };
+  const rc = { items, sub, disc, total, cash: credit ? 0 : cash, change: !credit && cash ? cash - total : 0, dp, method: credit ? 'Bayar Nanti (Piutang)' : a.name, customer: ok.cid ? contactName(ok.cid) : 'Umum', date: new Date(), phone: ok.cid ? (contact(ok.cid) || {}).phone : '' };
   S.cart = []; render(); receipt(rc);
 }
 function receiptText(r) {
@@ -1025,7 +1079,7 @@ function receiptText(r) {
   const nm = s => money(s).replace(/\s/g, ' ');
   return [S.biz.name.toUpperCase(), S.biz.address || '', S.biz.phone ? 'Telp ' + S.biz.phone : '', L, r.date.toLocaleString('id-ID'), 'Pelanggan: ' + r.customer, L,
     ...r.items.flatMap(i => [i.name, p('  ' + numf(i.qty, 2) + ' x ' + numf(i.price), nm(i.qty * i.price))]), L,
-    p('Subtotal', nm(r.sub)), r.disc ? p('Diskon', '-' + nm(r.disc)) : '', p('TOTAL', nm(r.total)), p('Bayar', r.method), r.cash ? p('Tunai', nm(r.cash)) : '', r.cash ? p('Kembali', nm(r.change)) : '', L, 'Terima kasih atas kunjungan Anda 🙏'].filter(Boolean).join('\n');
+    p('Subtotal', nm(r.sub)), r.disc ? p('Diskon', '-' + nm(r.disc)) : '', p('TOTAL', nm(r.total)), p('Bayar', r.method), r.cash ? p('Tunai', nm(r.cash)) : '', r.cash ? p('Kembali', nm(r.change)) : '', r.dp ? p('Uang muka', nm(r.dp)) : '', r.method.startsWith('Bayar Nanti') ? p('Sisa tagihan', nm(r.total - (r.dp || 0))) : '', L, 'Terima kasih atas kunjungan Anda 🙏'].filter(Boolean).join('\n');
 }
 function receipt(r) {
   const txt = receiptText(r); S._rc = txt;
@@ -1086,6 +1140,8 @@ function productForm(id) {
     <div class="set-row"><div class="t grow"><b>Aktif</b><small>Produk nonaktif tidak tampil di kasir</small></div><label class="switch"><input type="checkbox" name="active" ${p.active !== false ? 'checked' : ''}><i></i></label></div>
   </form>`, { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="pfs">Simpan</button>`, onMount: m => m.querySelector('#pfs').onclick = async () => {
     const f = formObj($('#pf')); if (!f.name.trim()) return toast('Nama wajib diisi', true);
+    if (S.d.products.some(x => x.id !== id && x.name.trim().toLowerCase() === f.name.trim().toLowerCase())) return toast('Produk dengan nama ini sudah ada', true);
+    if (N(f.min_stock) < 0 || (!id && N(f.stock) < 0)) return toast('Stok tidak boleh minus', true);
     const row = { name: f.name.trim(), group_name: f.group_name.trim() || null, unit: f.unit.trim() || 'pcs', buy_price: parseMoney(f.buy_price), sell_price: parseMoney(f.sell_price), min_stock: N(f.min_stock), sku: f.sku.trim() || null, track_stock: !!f.track_stock, active: !!f.active };
     const ok = await safe(async () => { if (id) await upd('products', id, row); else { const np = await add('products', { ...row, stock: N(f.stock) }); if (N(f.stock)) await add('stock_moves', { product_id: np.id, date: today(), qty: N(f.stock), kind: 'adjust', note: 'Stok awal' }); } return true; }, 'Produk disimpan');
     if (ok) { closeModal(); render(); } } });
@@ -1098,9 +1154,10 @@ function stockInPick() {
     <button class="btn block mt" onclick="productForm()">${ic('plus')} Produk baru</button>`);
 }
 function stockIn(pid) {
+  if (!S.d.accounts.length) return toast('Tambahkan akun kas/bank dulu di Pengaturan', true);
   const p = prod(pid), outs = cats('out'); const guess = outs.find(c => /stok|beli|pembelian|bahan|barang|pakan|bibit/i.test(c.name)) || outs[0];
   modal('Stok Masuk — ' + esc(p.name), `<form id="sif">
-    <div class="f-row"><label class="f"><span>Jumlah (${esc(p.unit || '')})</span><input class="inp" type="number" step="any" name="qty" required autofocus oninput="siCalc()"></label><label class="f"><span>Harga beli / ${esc(p.unit || 'unit')}</span>${moneyInput('price', p.buy_price, 'oninput="mfmt(this);siCalc()"')}</label></div>
+    <div class="f-row"><label class="f"><span>Jumlah (${esc(p.unit || '')})</span><input class="inp" type="number" step="any" name="qty" required autofocus oninput="siCalc()"></label><label class="f"><span>Harga beli / ${esc(p.unit || 'unit')}</span>${moneyInput('price', p.buy_price, '', 'siCalc()')}</label></div>
     <div class="total-line"><span>Total</span><span class="num" id="siTot">${money(0)}</span></div>
     <label class="f"><span>Pembayaran</span><select class="inp" name="pay" onchange="$('#siOpt').classList.toggle('hidden',this.value==='none');$('#siDue').classList.toggle('hidden',this.value!=='credit')">
       ${S.d.accounts.map(a => `<option value="${a.id}">Bayar dari ${esc(a.name)}</option>`).join('')}${mods().hutang ? '<option value="credit">Hutang ke supplier (bayar nanti)</option>' : ''}<option value="none">Hasil produksi sendiri / tanpa biaya</option></select></label>
@@ -1114,6 +1171,9 @@ function siCalc() { const f = formObj($('#sif')); $('#siTot').textContent = mone
 async function saveStockIn(pid) {
   const p = prod(pid), f = formObj($('#sif')), qty = N(f.qty), price = parseMoney(f.price), total = Math.round(qty * price);
   if (!(qty > 0)) return toast('Isi jumlah stok masuk', true);
+  if (f.pay === 'credit' && !(total > 0)) return toast('Isi harga beli untuk mencatat hutang', true);
+  if (f.pay !== 'none' && total > 0 && !f.cat) return toast('Pilih kategori biaya (tambah di Pengaturan bila kosong)', true);
+  if (!f.date) return toast('Isi tanggal', true);
   const btn = $('#sis'); busy(btn, true);
   const ok = await safe(async () => {
     let txId = null; const items = [{ pid, name: p.name, qty, price, cost: price, unit: p.unit }];
@@ -1132,7 +1192,7 @@ function opname(pid) {
     <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${N(p.stock)}" autofocus></label>
     <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
-      const f = formObj($('#opf')), real = N(f.real), diff = real - N(p.stock); if (!diff) return closeModal();
+      const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - N(p.stock); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
       const ok = await safe(async () => { await upd('products', pid, { stock: real }); await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
       if (ok) { closeModal(); render(); } } });
 }
@@ -1183,6 +1243,9 @@ function debtForm(id, kind = 'piutang') {
     <div id="dfAcc" class="hidden"><label class="f mt"><span>Akun</span><select class="inp" name="account_id">${S.d.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label></div>` : ''}
   </form>`, { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="dfs">Simpan</button>`, onMount: m => m.querySelector('#dfs').onclick = async () => {
     const f = formObj($('#df')), amount = parseMoney(f.amount); if (!amount) return toast('Isi jumlah', true);
+    if (id && amount < N(d.paid)) return toast('Jumlah tidak boleh lebih kecil dari yang sudah dibayar (' + money(d.paid) + ')', true);
+    if (f.due_date && f.due_date < f.date) return toast('Jatuh tempo tidak boleh sebelum tanggal', true);
+    if (!id && f.cash && !f.account_id) return toast('Pilih akun kas', true);
     if (!f.contact_id && !f.new_contact.trim()) return toast('Pilih atau isi nama', true);
     const ok = await safe(async () => {
       let cid = f.contact_id || null; if (!cid) cid = (await add('contacts', { name: f.new_contact.trim(), type: f.kind === 'piutang' ? 'pelanggan' : 'supplier' })).id;
@@ -1206,6 +1269,7 @@ function debtPay(id) {
 }
 function debtDetail(id) {
   const d = byId('debts', id), pays = S.d.transactions.filter(t => t.debt_id === id).sort(sortTx);
+  if (!d) return;
   modal((d.kind === 'piutang' ? 'Piutang' : 'Hutang') + ' — ' + esc(contactName(d.contact_id, d.contact_name)), `<div class="grid g3 mb"><div><div class="xs muted">Total</div><b class="num">${money(d.amount)}</b></div><div><div class="xs muted">Dibayar</div><b class="num c-in">${money(d.paid)}</b></div><div><div class="xs muted">Sisa</div><b class="num c-out">${money(debtLeft(d))}</b></div></div>
     <p class="small"><span class="muted">Tanggal:</span> ${fmtDate(d.date)} &nbsp; ${dueBadge(d)}<br>${d.note ? '<span class="muted">Ket:</span> ' + esc(d.note) : ''}</p>
     <h4 style="margin:10px 0 4px">Riwayat pembayaran</h4><div class="list">${pays.length ? pays.map(txRow).join('') : '<p class="muted small">Belum ada pembayaran.</p>'}</div>`,
@@ -1266,6 +1330,8 @@ function logForm(id, date) {
     { foot: `${l ? `<button class="btn danger" onclick="confirmBox('Hapus catatan tanggal ${fmtDate(v.date)}?',async()=>{await safe(()=>del('production_logs','${l.id}'),'Dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="lfs">Simpan</button>`,
       onMount: m => m.querySelector('#lfs').onclick = async () => {
         const f = formObj($('#lf')), vals = {}; ms.forEach(x => { const s = f['m_' + x.key]; if (s !== '' && s !== undefined) vals[x.key] = Number(s); });
+        if (!f.date) return toast('Isi tanggal', true);
+        if (!Object.keys(vals).length && !f.note.trim()) return toast('Isi minimal satu data atau catatan', true);
         const ok = await safe(async () => { const ex = l || S.d.production_logs.find(x => x.date === f.date); if (ex) await upd('production_logs', ex.id, { date: f.date, vals, note: f.note }); else await add('production_logs', { date: f.date, vals, note: f.note }); return true; }, 'Catatan tersimpan ✅');
         if (ok) { closeModal(); render(); } } });
 }
@@ -1366,10 +1432,18 @@ function contactForm(id) {
   const c = id ? contact(id) : { name: '', type: S.ct.type === 'all' ? 'pelanggan' : S.ct.type, phone: '', address: '', note: '' };
   modal(id ? 'Edit Kontak' : 'Kontak Baru', `<form id="cf"><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label>
     <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[...new Set([...listGet('ctypes'), c.type].filter(Boolean))].map(t => `<option ${c.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
-    <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>`,
-    { foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
+    <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>
+    ${id ? contactHistory(id) : ''}`,
+    { wide: !!id, foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
       onMount: m => m.querySelector('#cfs').onclick = async () => { const f = formObj($('#cf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), type: f.type, phone: f.phone.trim(), address: f.address.trim(), note: f.note.trim() };
         const ok = await safe(async () => { if (id) await upd('contacts', id, row); else await add('contacts', row); return true; }, 'Kontak disimpan'); if (ok) { closeModal(); render(); } } });
+}
+
+function contactHistory(id) {
+  const tx = S.d.transactions.filter(t => t.contact_id === id).sort(sortTx), ds = S.d.debts.filter(d => d.contact_id === id);
+  const pi = sum(ds.filter(d => d.kind === 'piutang'), debtLeft), hu = sum(ds.filter(d => d.kind === 'hutang'), debtLeft);
+  return `<div class="card mt" style="padding:14px"><div class="grid g3" style="gap:10px"><div><div class="xs muted">Transaksi</div><b>${tx.length}</b></div><div><div class="xs muted">Piutang</div><b class="num c-in">${money(pi)}</b></div><div><div class="xs muted">Hutang</div><b class="num c-out">${money(hu)}</b></div></div>
+    ${tx.length ? `<div class="list mt">${tx.slice(0, 5).map(txRow).join('')}</div>${tx.length > 5 ? `<button type="button" class="btn sm block" onclick="S.tx.q=${esc(JSON.stringify(contactName(id)))};S.tx.period='all';go('transaksi')">Lihat semua transaksi</button>` : ''}` : '<p class="xs muted" style="margin-bottom:0">Belum ada transaksi dengan kontak ini.</p>'}</div>`;
 }
 
 /* ---------------- PENGATURAN: lihat 6-extras.js ---------------- */
@@ -1642,7 +1716,7 @@ PAGES.pengaturan = {
         <div class="set-row"><div class="t grow"><b>Kunci aplikasi dengan PIN</b><small>${Lock.enabled() ? 'Aktif di perangkat ini 🔒' : 'Minta PIN 4 digit setiap aplikasi dibuka'}</small></div>${Lock.enabled() ? `<div class="row gap-s"><button class="btn sm" onclick="pinAction('change')">Ubah</button><button class="btn sm danger" onclick="pinAction('off')">Matikan</button></div>` : `<button class="btn sm primary" onclick="pinAction('on')">${ic('lock')} Aktifkan</button>`}</div>
         ${Lock.enabled() ? `<div class="set-row"><div class="t grow"><b>Kunci otomatis</b><small>Saat aplikasi ditinggalkan / di-minimize</small></div><select class="inp" style="width:auto" onchange="LS.set('bk_lock_after',Number(this.value));toast('Disimpan')">${[[0, 'Langsung'], [1, '1 menit'], [5, '5 menit'], [15, '15 menit'], [-1, 'Hanya saat dibuka']].map(([v, l]) => `<option value="${v}" ${Number(LS.get('bk_lock_after', 1)) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
         <div class="set-row"><div class="t grow"><b>Sembunyikan nominal</b><small>Saldo & angka diburamkan (tombol 👁 di atas)</small></div><label class="switch"><input type="checkbox" ${LS.get('bk_privacy', false) ? 'checked' : ''} onchange="togglePrivacy()"><i></i></label></div>
-        ${S.mode === 'cloud' ? `<div class="set-row"><div class="t grow"><b>Keluar dari semua perangkat</b><small>Akhiri semua sesi login akun ini</small></div><button class="btn sm danger" onclick="logout(true)">${ic('logout')} Keluar semua</button></div>` : ''}</div>
+        ${S.mode === 'cloud' ? `<div class="set-row"><div class="t grow"><b>Kata sandi akun</b><small>Ganti kata sandi login</small></div><button class="btn sm" onclick="changePass()">${ic('lock')} Ubah</button></div>` : ''}${S.mode === 'cloud' ? `<div class="set-row"><div class="t grow"><b>Keluar dari semua perangkat</b><small>Akhiri semua sesi login akun ini</small></div><button class="btn sm danger" onclick="logout(true)">${ic('logout')} Keluar semua</button></div>` : ''}</div>
 
       <div class="card" id="set-notif"><div class="card-h"><h3>🔔 Notifikasi & Pengingat</h3></div>
         <div class="set-row"><div class="t grow"><b>Notifikasi perangkat (pop-up HP/PC)</b><small>${perm === 'granted' ? 'Izin diberikan ✅' : perm === 'denied' ? 'Diblokir — buka pengaturan browser/HP untuk mengizinkan' : perm === 'unsupported' ? 'Tidak didukung browser ini — install aplikasi dulu' : 'Belum diizinkan'}</small></div>${ns.push && perm === 'granted' ? sw('push', true, 'setNotif') : `<button class="btn sm primary" onclick="enablePush()">Aktifkan</button>`}</div>

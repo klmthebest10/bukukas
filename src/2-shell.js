@@ -14,6 +14,7 @@ async function boot() {
     if (!window.supabase) { screen(`<div class="auth-card">${brandHTML()}<p>Tidak bisa memuat pustaka Supabase. Periksa koneksi internet lalu muat ulang.</p><button class="btn primary block" onclick="location.reload()">Muat ulang</button><button class="btn block mt" onclick="useLocal()">Pakai Mode Lokal</button></div>`); return; }
     try { S.sb = supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } }); } catch (e) { LS.del('bk_cfg'); return showSetup('URL/kunci Supabase tidak valid.'); }
     S.mode = 'cloud';
+    S.sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => changePass(true), 400); });
     const { data } = await S.sb.auth.getSession();
     if (data && data.session) { S.user = data.session.user; return afterAuth(); }
     return showAuth();
@@ -69,10 +70,18 @@ async function doAuth(e, tab) {
   } catch (err) { busy(b, false); toast(err.message === 'Invalid login credentials' ? 'Email atau kata sandi salah' : err.message, true); }
   return false;
 }
-async function forgotPass() {
-  const email = prompt('Masukkan email akun Anda:'); if (!email) return;
-  const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-  toast(error ? error.message : 'Link reset kata sandi dikirim ke email', !!error);
+function forgotPass() {
+  modal('Lupa Kata Sandi', `<form id="fpf"><p class="small muted" style="margin-top:0">Masukkan email akun Anda. Kami kirimkan link untuk membuat kata sandi baru.</p><label class="f"><span>Email</span><input class="inp" type="email" name="email" required autofocus></label><button class="btn primary block" id="fpb">Kirim Link Reset</button></form>`,
+    { onMount: m => m.querySelector('#fpf').onsubmit = async e => { e.preventDefault(); const email = formObj(e.target).email.trim(); if (!email) return; const b = $('#fpb'); busy(b, true);
+      const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }); busy(b, false);
+      if (error) return toast(error.message, true); closeModal(); toast('Link reset kata sandi dikirim ke ' + email); } });
+}
+function changePass(recovery) {
+  modal(recovery ? 'Buat Kata Sandi Baru' : 'Ubah Kata Sandi', `<form id="cpf">${recovery ? '<p class="small muted" style="margin-top:0">Silakan buat kata sandi baru untuk akun Anda.</p>' : ''}<label class="f"><span>Kata sandi baru</span><input class="inp" type="password" name="p1" minlength="6" autocomplete="new-password" required autofocus></label><label class="f"><span>Ulangi kata sandi baru</span><input class="inp" type="password" name="p2" minlength="6" autocomplete="new-password" required></label><button class="btn primary block" id="cpb">Simpan Kata Sandi</button></form>`,
+    { onMount: m => m.querySelector('#cpf').onsubmit = async e => { e.preventDefault(); const f = formObj(e.target);
+      if (f.p1.length < 6) return toast('Minimal 6 karakter', true); if (f.p1 !== f.p2) return toast('Kata sandi tidak sama', true);
+      const b = $('#cpb'); busy(b, true); const { error } = await S.sb.auth.updateUser({ password: f.p1 }); busy(b, false);
+      if (error) return toast(error.message, true); closeModal(); toast('Kata sandi berhasil diperbarui 🔐'); } });
 }
 async function logout(all) {
   confirmBox(all ? 'Keluar dari <b>semua perangkat</b>? Semua sesi login akun ini akan diakhiri.' : 'Keluar dari akun ini?', async () => {

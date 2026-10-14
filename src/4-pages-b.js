@@ -49,6 +49,8 @@ function productForm(id) {
     <div class="set-row"><div class="t grow"><b>Aktif</b><small>Produk nonaktif tidak tampil di kasir</small></div><label class="switch"><input type="checkbox" name="active" ${p.active !== false ? 'checked' : ''}><i></i></label></div>
   </form>`, { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="pfs">Simpan</button>`, onMount: m => m.querySelector('#pfs').onclick = async () => {
     const f = formObj($('#pf')); if (!f.name.trim()) return toast('Nama wajib diisi', true);
+    if (S.d.products.some(x => x.id !== id && x.name.trim().toLowerCase() === f.name.trim().toLowerCase())) return toast('Produk dengan nama ini sudah ada', true);
+    if (N(f.min_stock) < 0 || (!id && N(f.stock) < 0)) return toast('Stok tidak boleh minus', true);
     const row = { name: f.name.trim(), group_name: f.group_name.trim() || null, unit: f.unit.trim() || 'pcs', buy_price: parseMoney(f.buy_price), sell_price: parseMoney(f.sell_price), min_stock: N(f.min_stock), sku: f.sku.trim() || null, track_stock: !!f.track_stock, active: !!f.active };
     const ok = await safe(async () => { if (id) await upd('products', id, row); else { const np = await add('products', { ...row, stock: N(f.stock) }); if (N(f.stock)) await add('stock_moves', { product_id: np.id, date: today(), qty: N(f.stock), kind: 'adjust', note: 'Stok awal' }); } return true; }, 'Produk disimpan');
     if (ok) { closeModal(); render(); } } });
@@ -61,9 +63,10 @@ function stockInPick() {
     <button class="btn block mt" onclick="productForm()">${ic('plus')} Produk baru</button>`);
 }
 function stockIn(pid) {
+  if (!S.d.accounts.length) return toast('Tambahkan akun kas/bank dulu di Pengaturan', true);
   const p = prod(pid), outs = cats('out'); const guess = outs.find(c => /stok|beli|pembelian|bahan|barang|pakan|bibit/i.test(c.name)) || outs[0];
   modal('Stok Masuk — ' + esc(p.name), `<form id="sif">
-    <div class="f-row"><label class="f"><span>Jumlah (${esc(p.unit || '')})</span><input class="inp" type="number" step="any" name="qty" required autofocus oninput="siCalc()"></label><label class="f"><span>Harga beli / ${esc(p.unit || 'unit')}</span>${moneyInput('price', p.buy_price, 'oninput="mfmt(this);siCalc()"')}</label></div>
+    <div class="f-row"><label class="f"><span>Jumlah (${esc(p.unit || '')})</span><input class="inp" type="number" step="any" name="qty" required autofocus oninput="siCalc()"></label><label class="f"><span>Harga beli / ${esc(p.unit || 'unit')}</span>${moneyInput('price', p.buy_price, '', 'siCalc()')}</label></div>
     <div class="total-line"><span>Total</span><span class="num" id="siTot">${money(0)}</span></div>
     <label class="f"><span>Pembayaran</span><select class="inp" name="pay" onchange="$('#siOpt').classList.toggle('hidden',this.value==='none');$('#siDue').classList.toggle('hidden',this.value!=='credit')">
       ${S.d.accounts.map(a => `<option value="${a.id}">Bayar dari ${esc(a.name)}</option>`).join('')}${mods().hutang ? '<option value="credit">Hutang ke supplier (bayar nanti)</option>' : ''}<option value="none">Hasil produksi sendiri / tanpa biaya</option></select></label>
@@ -77,6 +80,9 @@ function siCalc() { const f = formObj($('#sif')); $('#siTot').textContent = mone
 async function saveStockIn(pid) {
   const p = prod(pid), f = formObj($('#sif')), qty = N(f.qty), price = parseMoney(f.price), total = Math.round(qty * price);
   if (!(qty > 0)) return toast('Isi jumlah stok masuk', true);
+  if (f.pay === 'credit' && !(total > 0)) return toast('Isi harga beli untuk mencatat hutang', true);
+  if (f.pay !== 'none' && total > 0 && !f.cat) return toast('Pilih kategori biaya (tambah di Pengaturan bila kosong)', true);
+  if (!f.date) return toast('Isi tanggal', true);
   const btn = $('#sis'); busy(btn, true);
   const ok = await safe(async () => {
     let txId = null; const items = [{ pid, name: p.name, qty, price, cost: price, unit: p.unit }];
@@ -95,7 +101,7 @@ function opname(pid) {
     <label class="f"><span>Stok fisik</span><input class="inp big" type="number" step="any" name="real" value="${N(p.stock)}" autofocus></label>
     <label class="f"><span>Alasan</span><select class="inp" name="note">${listGet('reasons').map(r => `<option>${esc(r)}</option>`).join('')}</select></label></form>`,
     { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="ops">Simpan</button>`, onMount: m => m.querySelector('#ops').onclick = async () => {
-      const f = formObj($('#opf')), real = N(f.real), diff = real - N(p.stock); if (!diff) return closeModal();
+      const f = formObj($('#opf')); if (f.real === '' || N(f.real) < 0) return toast('Isi stok fisik (tidak boleh minus)', true); const real = N(f.real), diff = real - N(p.stock); if (!diff) { closeModal(); return toast('Stok sudah sesuai'); }
       const ok = await safe(async () => { await upd('products', pid, { stock: real }); await add('stock_moves', { product_id: pid, date: today(), qty: diff, kind: 'adjust', note: f.note }); return true; }, 'Stok disesuaikan (' + (diff > 0 ? '+' : '') + numf(diff, 2) + ')');
       if (ok) { closeModal(); render(); } } });
 }
@@ -146,6 +152,9 @@ function debtForm(id, kind = 'piutang') {
     <div id="dfAcc" class="hidden"><label class="f mt"><span>Akun</span><select class="inp" name="account_id">${S.d.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label></div>` : ''}
   </form>`, { foot: `<button class="btn" onclick="closeModal()">Batal</button><button class="btn primary" id="dfs">Simpan</button>`, onMount: m => m.querySelector('#dfs').onclick = async () => {
     const f = formObj($('#df')), amount = parseMoney(f.amount); if (!amount) return toast('Isi jumlah', true);
+    if (id && amount < N(d.paid)) return toast('Jumlah tidak boleh lebih kecil dari yang sudah dibayar (' + money(d.paid) + ')', true);
+    if (f.due_date && f.due_date < f.date) return toast('Jatuh tempo tidak boleh sebelum tanggal', true);
+    if (!id && f.cash && !f.account_id) return toast('Pilih akun kas', true);
     if (!f.contact_id && !f.new_contact.trim()) return toast('Pilih atau isi nama', true);
     const ok = await safe(async () => {
       let cid = f.contact_id || null; if (!cid) cid = (await add('contacts', { name: f.new_contact.trim(), type: f.kind === 'piutang' ? 'pelanggan' : 'supplier' })).id;
@@ -169,6 +178,7 @@ function debtPay(id) {
 }
 function debtDetail(id) {
   const d = byId('debts', id), pays = S.d.transactions.filter(t => t.debt_id === id).sort(sortTx);
+  if (!d) return;
   modal((d.kind === 'piutang' ? 'Piutang' : 'Hutang') + ' — ' + esc(contactName(d.contact_id, d.contact_name)), `<div class="grid g3 mb"><div><div class="xs muted">Total</div><b class="num">${money(d.amount)}</b></div><div><div class="xs muted">Dibayar</div><b class="num c-in">${money(d.paid)}</b></div><div><div class="xs muted">Sisa</div><b class="num c-out">${money(debtLeft(d))}</b></div></div>
     <p class="small"><span class="muted">Tanggal:</span> ${fmtDate(d.date)} &nbsp; ${dueBadge(d)}<br>${d.note ? '<span class="muted">Ket:</span> ' + esc(d.note) : ''}</p>
     <h4 style="margin:10px 0 4px">Riwayat pembayaran</h4><div class="list">${pays.length ? pays.map(txRow).join('') : '<p class="muted small">Belum ada pembayaran.</p>'}</div>`,
@@ -229,6 +239,8 @@ function logForm(id, date) {
     { foot: `${l ? `<button class="btn danger" onclick="confirmBox('Hapus catatan tanggal ${fmtDate(v.date)}?',async()=>{await safe(()=>del('production_logs','${l.id}'),'Dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="lfs">Simpan</button>`,
       onMount: m => m.querySelector('#lfs').onclick = async () => {
         const f = formObj($('#lf')), vals = {}; ms.forEach(x => { const s = f['m_' + x.key]; if (s !== '' && s !== undefined) vals[x.key] = Number(s); });
+        if (!f.date) return toast('Isi tanggal', true);
+        if (!Object.keys(vals).length && !f.note.trim()) return toast('Isi minimal satu data atau catatan', true);
         const ok = await safe(async () => { const ex = l || S.d.production_logs.find(x => x.date === f.date); if (ex) await upd('production_logs', ex.id, { date: f.date, vals, note: f.note }); else await add('production_logs', { date: f.date, vals, note: f.note }); return true; }, 'Catatan tersimpan ✅');
         if (ok) { closeModal(); render(); } } });
 }

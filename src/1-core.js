@@ -59,7 +59,8 @@ const numf = (n, d = 0) => N(n).toLocaleString('id-ID', { maximumFractionDigits:
 const parseMoney = v => Number(String(v ?? '').replace(/[^\d]/g, '')) || 0;
 const mval = n => N(n) ? Math.round(N(n)).toLocaleString('id-ID') : '';
 function mfmt(el) { const v = el.value.replace(/\D/g, ''); el.value = v ? Number(v).toLocaleString('id-ID') : ''; }
-const moneyInput = (name, val, extra = '') => `<input class="inp num" name="${name}" inputmode="numeric" autocomplete="off" oninput="mfmt(this)" value="${mval(val)}" placeholder="0" ${extra}>`;
+/* input nominal Rupiah: otomatis titik ribuan. `after` = kode JS tambahan yang dijalankan setiap kali diketik */
+const moneyInput = (name, val, extra = '', after = '') => `<input class="inp num" name="${name}" inputmode="numeric" autocomplete="off" oninput="mfmt(this);${after}" value="${mval(val)}" placeholder="0" ${extra}>`;
 const formObj = f => Object.fromEntries(new FormData(f));
 const pct = (a, b) => b ? (a / b * 100) : 0;
 const initials = s => (String(s || '?').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('') || '•').toUpperCase();
@@ -272,11 +273,13 @@ function accBalance(a, upto) {
 }
 const totalBalance = () => sum(S.d.accounts, a => accBalance(a));
 const debtLeft = d => Math.max(0, N(d.amount) - N(d.paid));
+/* transaksi pembayaran hutang/piutang (bukan transaksi pencairan pinjaman) */
+const isDebtPay = t => { if (t.ref !== 'debt') return false; const d = byId('debts', t.debt_id); return !d || (d.kind === 'piutang' ? t.type === 'in' : t.type === 'out'); };
 const openDebts = kind => S.d.debts.filter(d => d.kind === kind && debtLeft(d) > 0.5);
 function txTitle(t) {
   if (t.type === 'transfer') return 'Transfer Saldo';
   const c = cat(t.category_id);
-  if (t.ref === 'debt') { const d = byId('debts', t.debt_id); return (t.type === 'in' ? 'Terima ' : 'Bayar ') + (d ? (d.kind === 'piutang' ? 'Piutang' : 'Hutang') : 'Hutang/Piutang'); }
+  if (t.ref === 'debt') { const d = byId('debts', t.debt_id); if (!isDebtPay(t)) return d && d.kind === 'hutang' ? 'Pinjaman Diterima' : 'Pinjaman Diberikan'; return (t.type === 'in' ? 'Terima ' : 'Bayar ') + (d ? (d.kind === 'piutang' ? 'Piutang' : 'Hutang') : 'Hutang/Piutang'); }
   if (t.ref === 'sale') return c ? c.name : 'Penjualan';
   if (t.ref === 'purchase') return c ? c.name : 'Pembelian Stok';
   return c ? c.name : (t.type === 'in' ? 'Pemasukan' : 'Pengeluaran');

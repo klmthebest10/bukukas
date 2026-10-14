@@ -95,10 +95,18 @@ function contactForm(id) {
   const c = id ? contact(id) : { name: '', type: S.ct.type === 'all' ? 'pelanggan' : S.ct.type, phone: '', address: '', note: '' };
   modal(id ? 'Edit Kontak' : 'Kontak Baru', `<form id="cf"><label class="f"><span>Nama</span><input class="inp" name="name" value="${esc(c.name)}" required autofocus></label>
     <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[...new Set([...listGet('ctypes'), c.type].filter(Boolean))].map(t => `<option ${c.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="f"><span>No HP / WA</span><input class="inp" name="phone" inputmode="tel" value="${esc(c.phone || '')}"></label></div>
-    <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>`,
-    { foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
+    <label class="f"><span>Alamat</span><input class="inp" name="address" value="${esc(c.address || '')}"></label><label class="f"><span>Catatan</span><input class="inp" name="note" value="${esc(c.note || '')}"></label></form>
+    ${id ? contactHistory(id) : ''}`,
+    { wide: !!id, foot: `${id ? `<button class="btn danger" onclick="confirmBox('Hapus kontak ini? Transaksinya tetap tersimpan.',async()=>{await safe(()=>del('contacts','${id}'),'Kontak dihapus');render()})">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="cfs">Simpan</button>`,
       onMount: m => m.querySelector('#cfs').onclick = async () => { const f = formObj($('#cf')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), type: f.type, phone: f.phone.trim(), address: f.address.trim(), note: f.note.trim() };
         const ok = await safe(async () => { if (id) await upd('contacts', id, row); else await add('contacts', row); return true; }, 'Kontak disimpan'); if (ok) { closeModal(); render(); } } });
+}
+
+function contactHistory(id) {
+  const tx = S.d.transactions.filter(t => t.contact_id === id).sort(sortTx), ds = S.d.debts.filter(d => d.contact_id === id);
+  const pi = sum(ds.filter(d => d.kind === 'piutang'), debtLeft), hu = sum(ds.filter(d => d.kind === 'hutang'), debtLeft);
+  return `<div class="card mt" style="padding:14px"><div class="grid g3" style="gap:10px"><div><div class="xs muted">Transaksi</div><b>${tx.length}</b></div><div><div class="xs muted">Piutang</div><b class="num c-in">${money(pi)}</b></div><div><div class="xs muted">Hutang</div><b class="num c-out">${money(hu)}</b></div></div>
+    ${tx.length ? `<div class="list mt">${tx.slice(0, 5).map(txRow).join('')}</div>${tx.length > 5 ? `<button type="button" class="btn sm block" onclick="S.tx.q=${esc(JSON.stringify(contactName(id)))};S.tx.period='all';go('transaksi')">Lihat semua transaksi</button>` : ''}` : '<p class="xs muted" style="margin-bottom:0">Belum ada transaksi dengan kontak ini.</p>'}</div>`;
 }
 
 /* ---------------- PENGATURAN: lihat 6-extras.js ---------------- */

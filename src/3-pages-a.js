@@ -209,7 +209,7 @@ function txForm(id, type = 'in', preset = {}) {
   const title = t ? 'Detail Transaksi' : type === 'in' ? 'Catat Pemasukan' : type === 'out' ? 'Catat Pengeluaran' : 'Transfer Saldo';
   const body = `<form id="txf">
     ${!t ? `<div class="seg"><button type="button" class="${type === 'in' ? 'on in' : ''}" onclick="txForm(null,'in')">⬆ Pemasukan</button><button type="button" class="${type === 'out' ? 'on out' : ''}" onclick="txForm(null,'out')">⬇ Pengeluaran</button><button type="button" class="${type === 'transfer' ? 'on' : ''}" onclick="txForm(null,'transfer')">🔁 Transfer</button></div>` : `<div class="row mb"><span class="pill ${type === 'in' ? 'in' : type === 'out' ? 'out' : 'info'}">${type === 'in' ? 'Pemasukan' : type === 'out' ? 'Pengeluaran' : 'Transfer'}</span>${t.ref ? `<span class="pill neutral">${t.ref === 'sale' ? 'Penjualan kasir' : t.ref === 'purchase' ? 'Pembelian stok' : 'Hutang/Piutang'}</span>` : ''}</div>`}
-    ${t && t.items ? `<div class="card mb" style="background:var(--surface-2);padding:12px">${t.items.map(i => `<div class="row between small"><span>${esc(i.name)} × ${numf(i.qty, 2)}</span><b class="num">${money(N(i.qty) * N(i.price))}</b></div>`).join('')}${N(t.disc) ? `<div class="row between small muted"><span>Diskon</span><span>−${money(t.disc)}</span></div>` : ''}${t.ref === 'sale' ? `<div class="row between xs muted" style="margin-top:6px"><span>Modal (HPP)</span><span>${money(t.cost)} • laba ${money(N(t.amount) - N(t.cost))}</span></div>` : ''}</div>` : ''}
+    ${t && t.items ? `<div class="card mb" style="background:var(--surface-2);padding:12px">${t.items.map(i => `<div class="row between small"><span>${esc(i.name)} × ${numf(i.qty, 2)}</span><b class="num">${money(N(i.qty) * N(i.price))}</b></div>`).join('')}${sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount) > 0 ? `<div class="row between small muted"><span>Diskon</span><span>−${money(sum(t.items, i => N(i.qty) * N(i.price)) - N(t.amount))}</span></div>` : ''}${t.ref === 'sale' ? `<div class="row between xs muted" style="margin-top:6px"><span>Modal (HPP)</span><span>${money(t.cost)} • laba ${money(N(t.amount) - N(t.cost))}</span></div>` : ''}</div>` : ''}
     <label class="f"><span>Jumlah</span><input class="inp big num ${type === 'in' ? 'c-in' : type === 'out' ? 'c-out' : ''}" name="amount" inputmode="numeric" oninput="mfmt(this)" value="${mval(v.amount)}" placeholder="0" ${lockAmt ? 'readonly' : ''} autofocus></label>
     ${type !== 'transfer' ? `<label class="f"><span>Kategori</span></label><input type="hidden" name="category_id" value="${v.category_id || ''}">
       <div class="cat-grid" id="catGrid">${cl.map(c => catOpt(c, v.category_id)).join('')}<div class="cat-opt" onclick="quickCat('${type}')"><span class="e">➕</span>Baru</div></div>` : ''}
@@ -227,14 +227,23 @@ function txForm(id, type = 'in', preset = {}) {
 }
 const catOpt = (c, sel) => `<div class="cat-opt ${sel === c.id ? 'on' : ''}" data-id="${c.id}" onclick="pickCat(this)"><span class="e">${esc(c.icon || '🏷️')}</span><span class="ell" style="display:block">${esc(c.name)}</span></div>`;
 function pickCat(el) { $$('#catGrid .cat-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#txf [name=category_id]').value = el.dataset.id; }
-async function quickCat(type) {
-  const name = prompt('Nama kategori ' + (type === 'in' ? 'pemasukan' : 'pengeluaran') + ' baru:'); if (!name || !name.trim()) return;
-  const c = await safe(() => add('categories', { name: name.trim(), type, icon: type === 'in' ? '💰' : '🧾', color: PALETTE[S.d.categories.length % 12] })); if (!c) return;
-  const g = $('#catGrid'); g.insertAdjacentHTML('afterbegin', catOpt(c)); pickCat(g.firstElementChild);
+function quickCat(type) {
+  const g = $('#catGrid'); if (!g || $('#qcBox')) return $('#qcBox input') && $('#qcBox input').focus();
+  g.insertAdjacentHTML('beforebegin', `<div class="row mb" id="qcBox"><input class="inp" placeholder="Nama kategori ${type === 'in' ? 'pemasukan' : 'pengeluaran'} baru" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();quickCatSave('${type}')}"><button type="button" class="btn primary" onclick="quickCatSave('${type}')">${ic('check')}</button><button type="button" class="btn" onclick="$('#qcBox').remove()">${ic('x')}</button></div>`);
+  $('#qcBox input').focus();
+}
+async function quickCatSave(type) {
+  const inp = $('#qcBox input'), name = inp.value.trim(); if (!name) return inp.focus();
+  if (cats(type).some(c => c.name.toLowerCase() === name.toLowerCase())) return toast('Kategori "' + name + '" sudah ada', true);
+  const c = await safe(() => add('categories', { name, type, icon: type === 'in' ? '💰' : '🧾', color: PALETTE[S.d.categories.length % 12] })); if (!c) return;
+  $('#qcBox').remove(); const g = $('#catGrid'); g.insertAdjacentHTML('afterbegin', catOpt(c)); pickCat(g.firstElementChild); toast('Kategori ditambahkan');
 }
 async function saveTx(id, type) {
   const f = formObj($('#txf')), t = id ? byId('transactions', id) : null, amount = parseMoney(f.amount);
   if (!amount) return toast('Isi jumlah transaksi', true);
+  if (!f.date) return toast('Isi tanggal transaksi', true);
+  if (!f.account_id) return toast('Pilih akun', true);
+  if (t && t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d && N(d.paid) + amount - N(t.amount) > N(d.amount) + 0.5) return toast('Melebihi total ' + (d.kind === 'piutang' ? 'piutang' : 'hutang') + ' (' + money(d.amount) + ')', true); }
   if (type !== 'transfer' && !f.category_id) return toast('Pilih kategori', true);
   if (type === 'transfer' && f.account_id === f.to_account_id) return toast('Akun asal dan tujuan harus berbeda', true);
   const row = { date: f.date, type, amount, account_id: f.account_id, note: f.note.trim(), category_id: type === 'transfer' ? null : f.category_id, to_account_id: type === 'transfer' ? f.to_account_id : null, contact_id: f.contact_id || null };
@@ -242,7 +251,7 @@ async function saveTx(id, type) {
   const ok = await safe(async () => {
     if (t) {
       if (t.ref === 'sale' || t.ref === 'purchase') { delete row.amount; delete row.type; }
-      if (t.ref === 'debt' && t.debt_id && amount !== N(t.amount)) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) + amount - N(t.amount)) }); }
+      if (t.ref === 'debt' && t.debt_id && amount !== N(t.amount)) { const d = byId('debts', t.debt_id); if (d && isDebtPay(t)) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) + amount - N(t.amount)) }); }
       if (t.ref === 'debt') row.category_id = t.category_id;
       await upd('transactions', t.id, row);
     } else await add('transactions', row);
@@ -252,14 +261,14 @@ async function saveTx(id, type) {
 }
 function deleteTx(id) {
   const t = byId('transactions', id); if (!t) return;
-  const note = t.ref === 'sale' ? ' Stok barang akan dikembalikan.' : t.ref === 'purchase' ? ' Stok barang akan dikurangi kembali.' : t.ref === 'debt' ? ' Sisa hutang/piutang akan bertambah lagi.' : '';
+  const note = t.ref === 'sale' ? ' Stok barang akan dikembalikan.' : t.ref === 'purchase' ? ' Stok barang akan dikurangi kembali.' : t.ref === 'debt' && isDebtPay(t) ? ' Sisa hutang/piutang akan bertambah lagi.' : '';
   confirmBox('Hapus transaksi <b>' + esc(txTitle(t)) + '</b> sebesar <b>' + money(t.amount) + '</b>?' + note, async () => {
     await safe(async () => {
       if ((t.ref === 'sale' || t.ref === 'purchase') && t.items) {
         for (const it of t.items) { const p = prod(it.pid); if (p && p.track_stock !== false) await upd('products', p.id, { stock: N(p.stock) + (t.ref === 'sale' ? 1 : -1) * N(it.qty) }); }
         for (const mv of S.d.stock_moves.filter(x => x.transaction_id === t.id)) await del('stock_moves', mv.id);
       }
-      if (t.ref === 'debt' && t.debt_id) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) - N(t.amount)) }); }
+      if (t.ref === 'debt' && t.debt_id && isDebtPay(t)) { const d = byId('debts', t.debt_id); if (d) await upd('debts', d.id, { paid: Math.max(0, N(d.paid) - N(t.amount)) }); }
       await del('transactions', id);
     }, 'Transaksi dihapus');
     render();
@@ -278,7 +287,7 @@ PAGES.kasir = {
         ${groups.length ? `<div class="chips mb"><button class="chip ${!S.kasir.grp ? 'on' : ''}" onclick="S.kasir.grp='';render()">Semua</button>${groups.map(g => `<button class="chip ${S.kasir.grp === g ? 'on' : ''}" data-g="${esc(g)}" onclick="S.kasir.grp=this.dataset.g;render()">${esc(g)}</button>`).join('')}</div>` : ''}
         <div class="pgrid" id="pgrid"></div>
       </div>
-      <div class="card cart"><div class="card-h"><h3>🛒 Keranjang</h3><button class="btn sm ghost" onclick="S.cart=[];renderCart()">Kosongkan</button></div><div id="cartBox"></div></div>
+      <div class="card cart"><div class="card-h"><h3>🛒 Keranjang</h3><button class="btn sm danger" id="cartClear" onclick="cartClear()">${ic('trash')} Batalkan</button></div><div id="cartBox"></div></div>
     </div>
     <div class="cart-bar" id="cartBar" onclick="checkoutForm()"></div>`;
   },
@@ -289,82 +298,115 @@ function renderPGrid() {
   const ps = S.d.products.filter(p => p.active !== false && (!S.kasir.grp || p.group_name === S.kasir.grp) && (!q || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
   const g = $('#pgrid'); if (!g) return;
   g.innerHTML = ps.length ? ps.map(p => { const inCart = S.cart.find(c => c.pid === p.id); const low = p.track_stock !== false && N(p.stock) <= N(p.min_stock);
-    return `<div class="pcard ${low ? 'low' : ''}" onclick="cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? 'Stok ' + numf(p.stock, 2) + ' ' + esc(p.unit || '') : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
+    return `<div class="pcard ${low ? 'low' : ''}" role="button" tabindex="0" onclick="cartAdd('${p.id}')" onkeydown="if(event.key==='Enter')cartAdd('${p.id}')">${inCart ? `<span class="q">${numf(inCart.qty, 2)}</span>` : ''}<div class="pe">${esc(initials(p.name))}</div><b>${esc(p.name)}</b><span class="ps">${p.track_stock !== false ? (N(p.stock) <= 0 ? 'Stok habis' : 'Stok ' + numf(p.stock, 2) + ' ' + esc(p.unit || '')) : esc(p.unit || 'item')}</span><span class="pp num">${money(p.sell_price)}</span></div>`; }).join('')
     : `<div class="empty" style="grid-column:1/-1"><div class="e">📦</div><p>${S.d.products.length ? 'Produk tidak ditemukan.' : 'Belum ada produk.'}</p><button class="btn primary sm" onclick="productForm()">${ic('plus')} Tambah Produk</button></div>`;
 }
 const cartTotal = () => sum(S.cart, c => N(c.qty) * N(c.price));
+function cartChanged() { renderCart(); renderPGrid(); if ($('#coItems')) { if (!S.cart.length) { closeModal(); toast('Keranjang dikosongkan'); } else { $('#coItems').innerHTML = coItemsHTML(); coCalc(); } } }
 function cartAdd(pid) {
   const p = prod(pid); if (!p) return; const c = S.cart.find(x => x.pid === pid);
   if (c) c.qty = N(c.qty) + 1; else S.cart.push({ pid, name: p.name, price: N(p.sell_price), cost: N(p.buy_price), qty: 1, unit: p.unit });
   const q = (c || S.cart[S.cart.length - 1]).qty;
   if (p.track_stock !== false && q > N(p.stock)) toast('⚠️ Stok ' + p.name + ' tidak mencukupi (sisa ' + numf(p.stock, 2) + ')', true);
   if (navigator.vibrate) navigator.vibrate(12);
-  renderCart(); renderPGrid();
+  cartChanged();
 }
-function cartSet(i, v) { v = Number(String(v).replace(',', '.')); if (!(v > 0)) S.cart.splice(i, 1); else S.cart[i].qty = v; renderCart(); renderPGrid(); }
+function cartSet(i, v) { if (!S.cart[i]) return; v = Number(String(v).replace(',', '.')); if (!(v > 0)) S.cart.splice(i, 1); else S.cart[i].qty = Math.round(v * 1000) / 1000; cartChanged(); }
+function cartStep(i, d) { if (!S.cart[i]) return; cartSet(i, N(S.cart[i].qty) + d); }
+function cartDel(i) { if (!S.cart[i]) return; const n = S.cart[i].name; S.cart.splice(i, 1); cartChanged(); toast('"' + n + '" dihapus dari keranjang'); }
+function cartPrice(i, v) { if (!S.cart[i]) return; S.cart[i].price = parseMoney(v); renderCart(); if ($('#coItems')) { const el = $('#coSub' + i); if (el) el.textContent = money(N(S.cart[i].qty) * N(S.cart[i].price)); coCalc(); } }
+function cartClear() { if (!S.cart.length) return toast('Keranjang sudah kosong'); confirmBox('Batalkan transaksi ini dan kosongkan keranjang (' + S.cart.length + ' item)?', () => { S.cart = []; cartChanged(); }, 'Ya, batalkan'); }
 function renderCart() {
   const box = $('#cartBox'), bar = $('#cartBar'), tot = cartTotal(), n = S.cart.length;
-  if (box) box.innerHTML = n ? `<div class="cart-items">${S.cart.map((c, i) => `<div class="ci"><div class="grow"><div class="ell" style="font-weight:700;font-size:13.5px">${esc(c.name)}</div><div class="xs muted num">${money(c.price)} / ${esc(c.unit || 'item')}</div></div>
-      <div class="qty"><button onclick="cartSet(${i},${N(c.qty) - 1})">−</button><input value="${c.qty}" inputmode="decimal" onchange="cartSet(${i},this.value)"><button onclick="cartSet(${i},${N(c.qty) + 1})">+</button></div>
-      <b class="num" style="min-width:76px;text-align:right;font-size:13.5px">${money(N(c.qty) * N(c.price))}</b></div>`).join('')}</div>
+  if (box) box.innerHTML = n ? `<div class="cart-items">${S.cart.map((c, i) => `<div class="ci"><button class="icon-btn" style="width:30px;height:30px;color:var(--out)" title="Hapus item" aria-label="Hapus ${esc(c.name)}" onclick="cartDel(${i})">${ic('x')}</button><div class="grow" style="min-width:0"><div class="ell" style="font-weight:700;font-size:13.5px">${esc(c.name)}</div><div class="xs muted num">${money(c.price)} / ${esc(c.unit || 'item')}</div></div>
+      <div class="qty"><button type="button" onclick="cartStep(${i},-1)" aria-label="Kurangi">−</button><input value="${c.qty}" inputmode="decimal" aria-label="Jumlah" onchange="cartSet(${i},this.value)"><button type="button" onclick="cartStep(${i},1)" aria-label="Tambah">+</button></div>
+      <b class="num" style="min-width:72px;text-align:right;font-size:13px">${money(N(c.qty) * N(c.price))}</b></div>`).join('')}</div>
       <div class="total-line"><span>Total</span><span class="num">${money(tot)}</span></div><button class="btn primary block" onclick="checkoutForm()">${ic('check')} Bayar</button>`
     : `<div class="empty"><div class="e">🛒</div><p class="small">Ketuk produk untuk menambah ke keranjang.</p></div>`;
+  const cb = $('#cartClear'); if (cb) cb.disabled = !n;
   if (bar) { bar.style.display = n ? '' : 'none'; bar.innerHTML = `${ic('cart')}<span class="grow">${n} item</span><b class="num">${money(tot)}</b><span>Bayar ›</span>`; }
 }
 function manualItem() {
-  modal('Item Manual', `<form id="mif"><label class="f"><span>Nama item / jasa</span><input class="inp" name="name" required autofocus></label><div class="f-row"><label class="f"><span>Harga</span>${moneyInput('price', '')}</label><label class="f"><span>Jumlah</span><input class="inp" name="qty" type="number" step="any" value="1"></label></div><button class="btn primary block">Tambah ke Keranjang</button></form>`,
-    { onMount: m => m.querySelector('#mif').onsubmit = e => { e.preventDefault(); const f = formObj(e.target); S.cart.push({ pid: null, name: f.name, price: parseMoney(f.price), cost: 0, qty: N(f.qty) || 1, unit: 'item' }); closeModal(); renderCart(); } });
+  modal('Item Manual', `<form id="mif"><label class="f"><span>Nama item / jasa</span><input class="inp" name="name" required autofocus></label><div class="f-row"><label class="f"><span>Harga</span>${moneyInput('price', '')}</label><label class="f"><span>Jumlah</span><input class="inp" name="qty" type="number" step="any" min="0" value="1"></label></div><button class="btn primary block">Tambah ke Keranjang</button></form>`,
+    { onMount: m => m.querySelector('#mif').onsubmit = e => { e.preventDefault(); const f = formObj(e.target); if (!f.name.trim()) return toast('Isi nama item', true); if (!parseMoney(f.price)) return toast('Isi harga item', true); S.cart.push({ pid: null, name: f.name.trim(), price: parseMoney(f.price), cost: 0, qty: N(f.qty) > 0 ? N(f.qty) : 1, unit: 'item' }); closeModal(); cartChanged(); } });
 }
 const saleCategory = () => cats('in').find(c => c.id === S.biz.settings.sale_cat) || cats('in')[0];
+function coItemsHTML() {
+  return S.cart.map((c, i) => `<div class="ci"><button type="button" class="icon-btn" style="width:30px;height:30px;color:var(--out)" title="Hapus item" aria-label="Hapus ${esc(c.name)}" onclick="cartDel(${i})">${ic('x')}</button>
+    <div class="grow" style="min-width:0"><div class="ell" style="font-weight:700;font-size:13.5px">${esc(c.name)}</div><input class="inp num" style="padding:5px 8px;font-size:13px;margin-top:4px;max-width:130px" inputmode="numeric" value="${mval(c.price)}" aria-label="Harga" oninput="mfmt(this);cartPrice(${i},this.value)"></div>
+    <div class="qty"><button type="button" onclick="cartStep(${i},-1)">−</button><input value="${c.qty}" inputmode="decimal" onchange="cartSet(${i},this.value)"><button type="button" onclick="cartStep(${i},1)">+</button></div>
+    <b class="num" id="coSub${i}" style="min-width:70px;text-align:right;font-size:13px">${money(N(c.qty) * N(c.price))}</b></div>`).join('');
+}
 function checkoutForm() {
   if (!S.cart.length) return toast('Keranjang masih kosong', true);
-  const tot = cartTotal(), m = mods(), sc = saleCategory();
-  const body = `<form id="cof">
-    <div class="card mb" style="background:var(--surface-2);padding:12px;max-height:160px;overflow:auto">${S.cart.map(c => `<div class="row between small"><span class="ell">${esc(c.name)} × ${numf(c.qty, 2)}</span><b class="num">${money(N(c.qty) * N(c.price))}</b></div>`).join('')}</div>
-    <div class="f-row"><label class="f"><span>Subtotal</span><input class="inp num" value="${money(tot)}" readonly></label><label class="f"><span>Diskon</span>${moneyInput('disc', '', 'oninput="mfmt(this);coCalc()"')}</label></div>
-    <div class="total-line" style="font-size:24px"><span>Total</span><span class="num c-in" id="coTotal">${money(tot)}</span></div>
-    <label class="f"><span>Metode pembayaran</span></label><input type="hidden" name="method" value="${S.d.accounts[0] ? S.d.accounts[0].id : ''}">
-    <div class="pay-opts">${S.d.accounts.map((a, i) => `<div class="pay-opt ${i === 0 ? 'on' : ''}" data-v="${a.id}" data-kas="${a.type === 'kas' ? 1 : 0}" onclick="coPay(this)">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'} ${esc(a.name)}</div>`).join('')}${m.hutang ? `<div class="pay-opt" data-v="credit" onclick="coPay(this)">📝 Bayar Nanti</div>` : ''}</div>
-    <div id="coCash"><label class="f"><span>Uang diterima</span>${moneyInput('cash', '', 'oninput="mfmt(this);coCalc()"')}</label><div class="quick-cash" id="qcash"></div><div class="row between mb"><span class="muted">Kembalian</span><b class="num" id="coChange" style="font-size:18px">-</b></div></div>
+  if (!S.d.accounts.length) return toast('Tambahkan akun kas/bank dulu di Pengaturan', true);
+  if (!cats('in').length) return toast('Tambahkan kategori pemasukan dulu di Pengaturan', true);
+  const m = mods(), sc = saleCategory(), first = S.d.accounts.find(a => a.type === 'kas') || S.d.accounts[0];
+  const body = `<form id="cof" onsubmit="event.preventDefault()">
+    <div class="row between mb"><b class="small">Rincian pesanan</b><button type="button" class="btn sm ghost" onclick="closeModal();manualItem()">${ic('plus')} Item</button></div>
+    <div id="coItems" class="mb" style="max-height:240px;overflow:auto">${coItemsHTML()}</div>
+    <div class="row between small"><span class="muted">Subtotal</span><b class="num" id="coSubtotal"></b></div>
+    <label class="f mt"><span>Diskon</span></label><input type="hidden" name="disc_mode" value="rp">
+    <div class="row mb" style="gap:8px"><div class="seg" style="margin:0;flex:none;width:110px"><button type="button" class="on" data-m="rp" onclick="coDiscMode(this)">Rp</button><button type="button" data-m="pct" onclick="coDiscMode(this)">%</button></div>${moneyInput('disc', '', 'aria-label="Diskon"', 'coCalc()')}</div>
+    <div class="chips" style="margin-top:-6px">${[5, 10, 15, 20].map(p => `<button type="button" class="chip" onclick="coDiscQuick(${p})">${p}%</button>`).join('')}<button type="button" class="chip" onclick="coDiscQuick(0)">Tanpa diskon</button></div>
+    <div class="row between small"><span class="muted">Potongan</span><b class="num c-out" id="coDiscAmt">-</b></div>
+    <div class="total-line" style="font-size:24px"><span>Total</span><span class="num c-in" id="coTotal"></span></div>
+    <label class="f"><span>Metode pembayaran</span></label><input type="hidden" name="method" value="${first.id}">
+    <div class="pay-opts">${S.d.accounts.map(a => `<div class="pay-opt ${a.id === first.id ? 'on' : ''}" role="button" tabindex="0" data-v="${a.id}" data-kas="${a.type === 'kas' ? 1 : 0}" onclick="coPay(this)">${a.type === 'kas' ? '💵' : a.type === 'bank' ? '🏦' : '📱'} ${esc(a.name)}</div>`).join('')}${m.hutang ? `<div class="pay-opt" role="button" tabindex="0" data-v="credit" onclick="coPay(this)">📝 Bayar Nanti</div>` : ''}</div>
+    <div id="coCash" class="${first.type === 'kas' ? '' : 'hidden'}"><label class="f"><span>Uang diterima</span>${moneyInput('cash', '', 'aria-label="Uang diterima"', 'coCalc()')}</label><div class="quick-cash" id="qcash"></div><div class="row between mb"><span class="muted">Kembalian</span><b class="num" id="coChange" style="font-size:18px">-</b></div></div>
     <div class="f-row"><label class="f"><span>Pelanggan</span><select class="inp" name="contact_id"><option value="">— Umum —</option>${S.d.contacts.filter(c => c.type !== 'supplier').map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
       <label class="f"><span>atau nama baru</span><input class="inp" name="new_contact" placeholder="Nama pelanggan"></label></div>
-    <div id="coDue" class="hidden"><label class="f"><span>Jatuh tempo pembayaran</span><input class="inp" type="date" name="due" value="${addDays(today(), 7)}"></label></div>
+    <div id="coDue" class="hidden"><div class="f-row"><label class="f"><span>Uang muka / DP (opsional)</span>${moneyInput('dp', '', '', 'coCalc()')}</label><label class="f"><span>Jatuh tempo</span><input class="inp" type="date" name="due" value="${addDays(today(), 7)}"></label></div>
+      <div class="f-row"><label class="f"><span>DP masuk ke</span><select class="inp" name="dp_acc">${S.d.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label><div class="f"><span class="xs muted" style="display:block;margin-bottom:7px;font-weight:700">Sisa jadi piutang</span><b class="num c-out" id="coLeft">-</b></div></div></div>
     <div class="f-row"><label class="f"><span>Kategori</span><select class="inp" name="cat">${cats('in').map(c => `<option value="${c.id}" ${sc && c.id === sc.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
-      <label class="f"><span>Tanggal</span><input class="inp" type="date" name="date" value="${today()}"></label></div>
-    <label class="f"><span>Catatan</span><input class="inp" name="note"></label></form>`;
-  modal('Pembayaran', body, { foot: `<button class="btn" onclick="closeModal()">Kembali</button><button class="btn primary" id="coBtn">${ic('check')} Selesaikan</button>`, onMount: m => { m.querySelector('#coBtn').onclick = doCheckout; coCalc(); } });
+      <label class="f"><span>Tanggal</span><input class="inp" type="date" name="date" value="${today()}" max="${addDays(today(), 1)}"></label></div>
+    <label class="f"><span>Catatan</span><input class="inp" name="note" placeholder="opsional"></label></form>`;
+  modal('Pembayaran', body, { wide: true, foot: `<button class="btn danger" onclick="cartClear()">${ic('x')} Batalkan</button><button class="btn" onclick="closeModal()">Kembali</button><button class="btn primary" id="coBtn">${ic('check')} Selesaikan</button>`, onMount: m => { m.querySelector('#coBtn').onclick = doCheckout; coCalc(); } });
 }
+function coDiscMode(el) { $$('#cof .seg button').forEach(b => b.classList.toggle('on', b === el)); $('#cof [name=disc_mode]').value = el.dataset.m; const d = $('#cof [name=disc]'); d.value = ''; d.placeholder = el.dataset.m === 'pct' ? '0 %' : '0'; d.focus(); coCalc(); }
+function coDiscQuick(p) { const btn = $$('#cof .seg button')[p ? 1 : 0]; $$('#cof .seg button').forEach(b => b.classList.toggle('on', b === btn)); $('#cof [name=disc_mode]').value = p ? 'pct' : 'rp'; $('#cof [name=disc]').value = p ? String(p) : ''; coCalc(); }
+function coDisc(f, sub) { const v = parseMoney(f.disc); return Math.min(sub, f.disc_mode === 'pct' ? Math.round(sub * Math.min(100, v) / 100) : v); }
 function coPay(el) {
-  $$('.pay-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#cof [name=method]').value = el.dataset.v;
-  $('#coCash').classList.toggle('hidden', el.dataset.kas !== '1'); $('#coDue').classList.toggle('hidden', el.dataset.v !== 'credit');
+  $$('#cof .pay-opt').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('#cof [name=method]').value = el.dataset.v;
+  $('#coCash').classList.toggle('hidden', el.dataset.kas !== '1'); $('#coDue').classList.toggle('hidden', el.dataset.v !== 'credit'); coCalc();
 }
 function coCalc() {
-  const f = formObj($('#cof')), tot = Math.max(0, cartTotal() - parseMoney(f.disc)), cash = parseMoney(f.cash);
+  const fm = $('#cof'); if (!fm) return;
+  const f = formObj(fm), sub = cartTotal(), disc = coDisc(f, sub), tot = Math.max(0, sub - disc), cash = parseMoney(f.cash), dp = Math.min(parseMoney(f.dp), tot);
+  $('#coSubtotal').textContent = money(sub); $('#coDiscAmt').textContent = disc ? '−' + money(disc) + (f.disc_mode === 'pct' && parseMoney(f.disc) ? ' (' + Math.min(100, parseMoney(f.disc)) + '%)' : '') : '-';
   $('#coTotal').textContent = money(tot);
-  $('#coChange').textContent = cash ? money(cash - tot) : '-'; $('#coChange').className = 'num ' + (cash && cash < tot ? 'c-out' : 'c-in');
+  $('#coChange').textContent = cash ? (cash >= tot ? money(cash - tot) : 'Kurang ' + money(tot - cash)) : '-'; $('#coChange').className = 'num ' + (cash && cash < tot ? 'c-out' : 'c-in');
+  if ($('#coLeft')) $('#coLeft').textContent = money(tot - dp);
   const sugg = [...new Set([tot, Math.ceil(tot / 5000) * 5000, Math.ceil(tot / 10000) * 10000, Math.ceil(tot / 50000) * 50000, Math.ceil(tot / 100000) * 100000])].filter(v => v >= tot && v > 0).slice(0, 5);
   $('#qcash').innerHTML = sugg.map((v, i) => `<button type="button" class="chip" onclick="const c=$('#cof [name=cash]');c.value='${mval(v)}';coCalc()">${i === 0 ? 'Uang pas' : short(v)}</button>`).join('');
 }
 async function doCheckout() {
-  const f = formObj($('#cof')), sub = cartTotal(), disc = parseMoney(f.disc), total = Math.max(0, sub - disc), cash = parseMoney(f.cash), method = f.method;
-  const credit = method === 'credit', a = acc(method);
+  if (!S.cart.length) return toast('Keranjang kosong', true);
+  const f = formObj($('#cof')), sub = cartTotal(), disc = coDisc(f, sub), total = Math.max(0, sub - disc), cash = parseMoney(f.cash), method = f.method;
+  const credit = method === 'credit', a = acc(method), dp = credit ? Math.min(parseMoney(f.dp), total) : 0;
+  if (S.cart.some(c => !(N(c.qty) > 0))) return toast('Jumlah item harus lebih dari 0', true);
   if (!credit && !a) return toast('Pilih metode pembayaran', true);
-  if (a && a.type === 'kas' && cash && cash < total) return toast('Uang diterima kurang dari total', true);
+  if (!f.cat) return toast('Pilih kategori pemasukan', true);
+  if (a && a.type === 'kas' && cash && cash < total) return toast('Uang diterima kurang ' + money(total - cash), true);
   if (credit && !f.contact_id && !f.new_contact.trim()) return toast('Isi nama pelanggan untuk penjualan bayar nanti', true);
+  if (credit && dp >= total) return toast('DP sama dengan total — pilih metode bayar tunai/transfer saja', true);
   const btn = $('#coBtn'); busy(btn, true);
   const items = S.cart.map(c => ({ pid: c.pid, name: c.name, qty: N(c.qty), price: N(c.price), cost: N(c.cost), unit: c.unit }));
   const cost = sum(items, i => i.qty * i.cost), date = f.date || today(), txId = uid();
   const ok = await safe(async () => {
     let cid = f.contact_id || null;
-    if (!cid && f.new_contact.trim()) cid = (await add('contacts', { name: f.new_contact.trim(), type: 'pelanggan' })).id;
-    if (credit) await add('debts', { kind: 'piutang', contact_id: cid, amount: total, paid: 0, date, due_date: f.due || null, category_id: f.cat, source: 'sale', note: 'Penjualan: ' + items.map(i => i.name + ' x' + i.qty).join(', ').slice(0, 300) });
-    else await add('transactions', { id: txId, date, type: 'in', amount: total, category_id: f.cat, account_id: method, contact_id: cid, ref: 'sale', items, cost, note: f.note.trim() + (disc ? (f.note.trim() ? ' • ' : '') + 'Diskon ' + money(disc) : '') });
+    if (!cid && f.new_contact.trim()) cid = (await add('contacts', { name: f.new_contact.trim(), type: listGet('ctypes')[0] || 'pelanggan' })).id;
+    const discNote = disc ? 'Diskon ' + money(disc) : '';
+    if (credit) {
+      const d = await add('debts', { kind: 'piutang', contact_id: cid, amount: total, paid: dp, date, due_date: f.due || null, category_id: f.cat, source: 'sale', note: ('Penjualan: ' + items.map(i => i.name + ' x' + i.qty).join(', ')).slice(0, 280) + (discNote ? ' • ' + discNote : '') });
+      if (dp) await add('transactions', { date, type: 'in', amount: dp, account_id: f.dp_acc, contact_id: cid, ref: 'debt', debt_id: d.id, category_id: f.cat, note: 'Uang muka penjualan' });
+    } else await add('transactions', { id: txId, date, type: 'in', amount: total, category_id: f.cat, account_id: method, contact_id: cid, ref: 'sale', items, cost, note: [f.note.trim(), discNote].filter(Boolean).join(' • ') });
     for (const it of items) { const p = prod(it.pid); if (!p || p.track_stock === false) continue; await upd('products', p.id, { stock: N(p.stock) - it.qty }); await add('stock_moves', { product_id: p.id, date, qty: -it.qty, kind: 'sale', note: credit ? 'Penjualan (piutang)' : 'Penjualan', transaction_id: credit ? null : txId }); }
     if (f.cat !== S.biz.settings.sale_cat) { S.biz.settings.sale_cat = f.cat; updBiz({ settings: S.biz.settings }).catch(() => {}); }
     return { cid };
   });
   busy(btn, false); if (!ok) return;
-  const rc = { items, sub, disc, total, cash, change: cash ? cash - total : 0, method: credit ? 'Bayar Nanti (Piutang)' : a.name, customer: ok.cid ? contactName(ok.cid) : 'Umum', date: new Date(), phone: ok.cid ? (contact(ok.cid) || {}).phone : '' };
+  const rc = { items, sub, disc, total, cash: credit ? 0 : cash, change: !credit && cash ? cash - total : 0, dp, method: credit ? 'Bayar Nanti (Piutang)' : a.name, customer: ok.cid ? contactName(ok.cid) : 'Umum', date: new Date(), phone: ok.cid ? (contact(ok.cid) || {}).phone : '' };
   S.cart = []; render(); receipt(rc);
 }
 function receiptText(r) {
@@ -372,7 +414,7 @@ function receiptText(r) {
   const nm = s => money(s).replace(/\s/g, ' ');
   return [S.biz.name.toUpperCase(), S.biz.address || '', S.biz.phone ? 'Telp ' + S.biz.phone : '', L, r.date.toLocaleString('id-ID'), 'Pelanggan: ' + r.customer, L,
     ...r.items.flatMap(i => [i.name, p('  ' + numf(i.qty, 2) + ' x ' + numf(i.price), nm(i.qty * i.price))]), L,
-    p('Subtotal', nm(r.sub)), r.disc ? p('Diskon', '-' + nm(r.disc)) : '', p('TOTAL', nm(r.total)), p('Bayar', r.method), r.cash ? p('Tunai', nm(r.cash)) : '', r.cash ? p('Kembali', nm(r.change)) : '', L, 'Terima kasih atas kunjungan Anda 🙏'].filter(Boolean).join('\n');
+    p('Subtotal', nm(r.sub)), r.disc ? p('Diskon', '-' + nm(r.disc)) : '', p('TOTAL', nm(r.total)), p('Bayar', r.method), r.cash ? p('Tunai', nm(r.cash)) : '', r.cash ? p('Kembali', nm(r.change)) : '', r.dp ? p('Uang muka', nm(r.dp)) : '', r.method.startsWith('Bayar Nanti') ? p('Sisa tagihan', nm(r.total - (r.dp || 0))) : '', L, 'Terima kasih atas kunjungan Anda 🙏'].filter(Boolean).join('\n');
 }
 function receipt(r) {
   const txt = receiptText(r); S._rc = txt;
