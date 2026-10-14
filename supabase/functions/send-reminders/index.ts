@@ -2,16 +2,50 @@
 // Dipanggil pg_cron tiap 15 menit. Menghitung pengingat setiap usaha (stok menipis,
 // hutang/piutang jatuh tempo, anggaran, target, pengingat harian) lalu mengirim Web Push
 // ke semua perangkat pengguna — tetap muncul walau aplikasi ditutup.
-//   POST {}               + header x-cron-secret  -> jalankan semua pengingat
-//   POST {"test":true}    + Authorization user JWT -> kirim notifikasi uji ke perangkat pengguna
-//   POST {"selftest":true}+ header x-cron-secret  -> cek konfigurasi & enkripsi push
+// Tanpa library push eksternal: enkripsi (RFC 8291) & VAPID (RFC 8292) memakai WebCrypto bawaan.
+//   POST {}                + header x-cron-secret   -> jalankan semua pengingat
+//   POST {"test":true}     + Authorization user JWT -> kirim notifikasi uji ke perangkat pengguna
+//   POST {"selftest":true} + header x-cron-secret   -> cek konfigurasi & enkripsi
 import { createClient } from "npm:@supabase/supabase-js@2";
-import webpush from "npm:web-push@3.6.7";
 
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (d: unknown, status = 200) => new Response(JSON.stringify(d), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
+/* ---------------- Web Push (VAPID + aes128gcm) ---------------- */
+const te = new TextEncoder();
+const b64uDec = (s: string) => { const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+const b64uEnc = (u: Uint8Array) => { let s = ""; for (const x of u) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const concat = (...a: Uint8Array[]) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of a) { o.set(x, i); i += x.length; } return o; };
+async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, len: number) {
+  const k = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, k, len * 8));
+}
+export async function encryptPayload(p256dh: string, authSecret: string, data: Uint8Array) {
+  const uaPub = b64uDec(p256dh), auth = b64uDec(authSecret);
+  const as = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]) as CryptoKeyPair;
+  const asPub = new Uint8Array(await crypto.subtle.exportKey("raw", as.publicKey));
+  const uaKey = await crypto.subtle.importKey("raw", uaPub, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const ecdh = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: uaKey }, as.privateKey, 256));
+  const ikm = await hkdf(auth, ecdh, concat(te.encode("WebPush: info\0"), uaPub, asPub), 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(salt, ikm, te.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, te.encode("Content-Encoding: nonce\0"), 12);
+  const key = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["encrypt"]);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, concat(data, new Uint8Array([2]))));
+  const rs = new Uint8Array(4); new DataView(rs.buffer).setUint32(0, 4096);
+  return concat(salt, rs, new Uint8Array([asPub.length]), asPub, ct);
+}
+let VKEY: CryptoKey | null = null;
+export async function vapidHeader(endpoint: string, pub: string, priv: string, subject: string) {
+  if (!VKEY) { const p = b64uDec(pub); VKEY = await crypto.subtle.importKey("jwk", { kty: "EC", crv: "P-256", x: b64uEnc(p.slice(1, 33)), y: b64uEnc(p.slice(33, 65)), d: priv, ext: true }, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]); }
+  const h = b64uEnc(te.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const c = b64uEnc(te.encode(JSON.stringify({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: subject })));
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, VKEY, te.encode(h + "." + c)));
+  return `vapid t=${h}.${c}.${b64uEnc(sig)}, k=${pub}`;
+}
+
+/* ---------------- konfigurasi dari Vault ---------------- */
 type Cfg = Record<string, string>;
 let CFG: Cfg | null = null;
 async function cfg(): Promise<Cfg> {
@@ -19,17 +53,30 @@ async function cfg(): Promise<Cfg> {
   const { data, error } = await sb.rpc("get_push_config");
   if (error) throw error;
   CFG = data as Cfg;
-  webpush.setVapidDetails(CFG.bukukas_vapid_subject, CFG.bukukas_vapid_public, CFG.bukukas_vapid_private);
+  if (!CFG.bukukas_vapid_public || !CFG.bukukas_vapid_private) throw new Error("Kunci VAPID belum ada di Vault (jalankan 003_secrets_cron.sql)");
   return CFG;
 }
 
+async function send(sub: any, payload: Record<string, unknown>) {
+  const c = await cfg();
+  try {
+    const body = await encryptPayload(sub.p256dh, sub.auth, te.encode(JSON.stringify(payload)));
+    const r = await fetch(sub.endpoint, { method: "POST", headers: { "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", TTL: "21600", Urgency: "normal", Authorization: await vapidHeader(sub.endpoint, c.bukukas_vapid_public, c.bukukas_vapid_private, c.bukukas_vapid_subject || "mailto:admin@example.com") }, body });
+    if (r.status === 404 || r.status === 410) { await sb.from("push_subscriptions").delete().eq("id", sub.id); return false; }
+    if (!r.ok) { console.error("push gagal", r.status, await r.text()); return false; }
+    await sb.from("push_subscriptions").update({ last_ok: new Date().toISOString() }).eq("id", sub.id);
+    return true;
+  } catch (e: any) { console.error("push error", e?.message || e); return false; }
+}
+
+/* ---------------- perhitungan pengingat ---------------- */
 const N = (v: unknown) => Number(v) || 0;
 const DEF = { stok: true, piutang: true, hutang: true, anggaran: true, catat: true, harian: true, ringkasan: false, target: true, push: false, jam: "19:00", hari_jatuh_tempo: 3 };
 const MODS = { kasir: true, stok: true, hutang: true, harian: false, anggaran: true };
 function localNow(tz: string) {
+  const opt: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false };
   let f: Intl.DateTimeFormat;
-  try { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }); }
-  catch { f = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }); }
+  try { f = new Intl.DateTimeFormat("en-CA", { ...opt, timeZone: tz }); } catch { f = new Intl.DateTimeFormat("en-CA", { ...opt, timeZone: "Asia/Jakarta" }); }
   const p = Object.fromEntries(f.formatToParts(new Date()).map((x) => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, min: (N(p.hour) % 24) * 60 + N(p.minute) };
 }
@@ -37,16 +84,14 @@ const addDays = (s: string, n: number) => { const d = new Date(s + "T00:00:00Z")
 const diffDays = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 864e5);
 const fmtDate = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const numf = (n: number) => N(n).toLocaleString("id-ID", { maximumFractionDigits: 2 });
+const money = (n: number) => "Rp " + Math.round(N(n)).toLocaleString("id-ID");
 
 type Alert = { id: string; e: string; t: string; b: string; page: string; lv: string };
 
 async function bizAlerts(biz: any, today: string, nowMin: number): Promise<Alert[]> {
   const st = biz.settings || {}, ns = { ...DEF, ...(st.notif || {}) }, m = { ...MODS, ...(st.mods || {}) };
   if (!ns.push) return [];
-  const cur = biz.currency || "IDR";
-  const money = (n: number) => { try { return new Intl.NumberFormat("id-ID", { style: "currency", currency: cur, maximumFractionDigits: cur === "IDR" || cur === "KRW" ? 0 : 2 }).format(N(n)); } catch { return "Rp " + Math.round(N(n)).toLocaleString("id-ID"); } };
-  const monthStart = today.slice(0, 8) + "01";
-  const id = biz.id;
+  const monthStart = today.slice(0, 8) + "01", id = biz.id;
   const [P, D, Bu, C, T, L, K] = await Promise.all([
     sb.from("products").select("id,name,stock,min_stock,unit,track_stock,active").eq("business_id", id),
     sb.from("debts").select("id,kind,amount,paid,due_date,contact_id,contact_name").eq("business_id", id),
@@ -99,18 +144,6 @@ async function bizAlerts(biz: any, today: string, nowMin: number): Promise<Alert
   return A.map((a) => ({ ...a, id: biz.id.slice(0, 8) + ":" + a.id, b: a.b + " — " + biz.name }));
 }
 
-async function send(sub: any, payload: Record<string, unknown>) {
-  try {
-    await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify(payload), { TTL: 6 * 3600, urgency: "normal" });
-    await sb.from("push_subscriptions").update({ last_ok: new Date().toISOString() }).eq("id", sub.id);
-    return true;
-  } catch (e: any) {
-    if (e?.statusCode === 404 || e?.statusCode === 410) await sb.from("push_subscriptions").delete().eq("id", sub.id);
-    else console.error("push gagal", e?.statusCode, e?.body || e?.message);
-    return false;
-  }
-}
-
 async function runAll() {
   const { data: subs, error } = await sb.from("push_subscriptions").select("*");
   if (error) throw error;
@@ -118,8 +151,8 @@ async function runAll() {
   for (const s of subs || []) { if (!byUser.has(s.user_id)) byUser.set(s.user_id, []); byUser.get(s.user_id)!.push(s); }
   let users = 0, sent = 0;
   for (const [uid, list] of byUser) {
-    const { data: bizs } = await sb.from("businesses").select("id,name,currency,settings").eq("user_id", uid);
-    const { date, min } = localNow(bizs?.[0]?.settings?.tz || list[0].tz || "Asia/Jakarta");
+    const { data: bizs } = await sb.from("businesses").select("id,name,settings").eq("user_id", uid);
+    const { date } = localNow(bizs?.[0]?.settings?.tz || list[0].tz || "Asia/Jakarta");
     const all: Alert[] = [];
     for (const b of bizs || []) { const l = localNow(b.settings?.tz || "Asia/Jakarta"); all.push(...await bizAlerts(b, l.date, l.min)); }
     if (!all.length) continue;
@@ -133,7 +166,6 @@ async function runAll() {
     for (const msg of msgs) for (const s of list) if (await send(s, msg)) sent++;
     await sb.from("push_log").upsert(fresh.map((a) => ({ user_id: uid, alert_id: a.id, sent_on: date })), { onConflict: "user_id,alert_id,sent_on", ignoreDuplicates: true });
   }
-  // bersihkan log lama (> 40 hari)
   await sb.from("push_log").delete().lt("sent_on", addDays(new Date().toISOString().slice(0, 10), -40));
   return { ok: true, users, sent, subscriptions: (subs || []).length };
 }
@@ -154,13 +186,11 @@ Deno.serve(async (req) => {
     }
     if (req.headers.get("x-cron-secret") !== c.bukukas_cron_secret) return json({ error: "forbidden" }, 403);
     if (body.selftest) {
-      const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+      const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]) as CryptoKeyPair;
       const raw = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
-      const b64u = (u: Uint8Array) => btoa(String.fromCharCode(...u)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      try {
-        const r = await webpush.generateRequestDetails({ endpoint: "https://fcm.googleapis.com/fcm/send/selftest", keys: { p256dh: b64u(raw), auth: b64u(crypto.getRandomValues(new Uint8Array(16))) } }, "tes");
-        return json({ ok: true, encrypted_bytes: (r.body as Uint8Array).length, has_vapid_header: String(r.headers.Authorization || "").startsWith("vapid") });
-      } catch (e: any) { return json({ ok: false, error: String(e?.message || e) }, 500); }
+      const enc = await encryptPayload(b64uEnc(raw), b64uEnc(crypto.getRandomValues(new Uint8Array(16))), te.encode("tes"));
+      const vh = await vapidHeader("https://fcm.googleapis.com/fcm/send/x", c.bukukas_vapid_public, c.bukukas_vapid_private, c.bukukas_vapid_subject);
+      return json({ ok: true, encrypted_bytes: enc.length, vapid: vh.startsWith("vapid t=") });
     }
     return json(await runAll());
   } catch (e: any) {
