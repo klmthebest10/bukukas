@@ -12,7 +12,7 @@ async function boot() {
   if (mode === 'local') { S.mode = 'local'; return afterAuth(); }
   if (cfg.url && cfg.key) {
     if (!window.supabase) { screen(`<div class="auth-card">${brandHTML()}<p>Tidak bisa memuat pustaka Supabase. Periksa koneksi internet lalu muat ulang.</p><button class="btn primary block" onclick="location.reload()">Muat ulang</button><button class="btn block mt" onclick="useLocal()">Pakai Mode Lokal</button></div>`); return; }
-    try { S.sb = supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } }); } catch (e) { LS.del('bk_cfg'); return showSetup('URL/kunci Supabase tidak valid.'); }
+    try { S.sb = supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, global: { fetch: fetchRetry } }); } catch (e) { LS.del('bk_cfg'); return showSetup('URL/kunci Supabase tidak valid.'); }
     S.mode = 'cloud';
     S.sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => changePass(true), 400); });
     const { data } = await S.sb.auth.getSession();
@@ -60,14 +60,15 @@ async function doAuth(e, tab) {
     if (tab === 'reg') {
       const { data, error } = await S.sb.auth.signUp({ email: f.email, password: f.pass, options: { data: { name: f.name }, emailRedirectTo: location.origin + location.pathname } });
       if (error) throw error;
-      if (!data.session) { showAuth('login', '✅ Akun dibuat. Silakan cek email Anda untuk konfirmasi, lalu masuk.'); return false; }
+      if (data.user && Array.isArray(data.user.identities) && !data.user.identities.length) throw new Error('User already registered');
+      if (!data.session) { LS.set('bk_pending_email', f.email); showAuth('login', `✅ <b>Akun dibuat.</b> Buka email <b>${esc(f.email)}</b> dan klik link konfirmasi, lalu kembali ke sini dan masuk.<br><button class="btn sm mt" onclick="resendConfirm()">Kirim ulang email konfirmasi</button>`); return false; }
       S.user = data.user;
     } else {
       const { data, error } = await S.sb.auth.signInWithPassword({ email: f.email, password: f.pass });
       if (error) throw error; S.user = data.user;
     }
     await afterAuth();
-  } catch (err) { busy(b, false); toast(err.message === 'Invalid login credentials' ? 'Email atau kata sandi salah' : err.message, true); }
+  } catch (err) { busy(b, false); const msg = humanErr(err); toast(msg, true); if (/belum dikonfirmasi/.test(msg)) { LS.set('bk_pending_email', f.email); showAuth('login', `⚠️ Email <b>${esc(f.email)}</b> belum dikonfirmasi. Cek kotak masuk / folder spam.<br><button class="btn sm mt" onclick="resendConfirm()">Kirim ulang email konfirmasi</button>`); } }
   return false;
 }
 function forgotPass() {
@@ -75,6 +76,11 @@ function forgotPass() {
     { onMount: m => m.querySelector('#fpf').onsubmit = async e => { e.preventDefault(); const email = formObj(e.target).email.trim(); if (!email) return; const b = $('#fpb'); busy(b, true);
       const { error } = await S.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }); busy(b, false);
       if (error) return toast(error.message, true); closeModal(); toast('Link reset kata sandi dikirim ke ' + email); } });
+}
+async function resendConfirm() {
+  const email = LS.get('bk_pending_email', ''); if (!email) return toast('Isi email lalu tekan Daftar lagi', true);
+  const { error } = await S.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: location.origin + location.pathname } });
+  toast(error ? humanErr(error) : 'Email konfirmasi dikirim ulang ke ' + email, !!error);
 }
 function changePass(recovery) {
   modal(recovery ? 'Buat Kata Sandi Baru' : 'Ubah Kata Sandi', `<form id="cpf">${recovery ? '<p class="small muted" style="margin-top:0">Silakan buat kata sandi baru untuk akun Anda.</p>' : ''}<label class="f"><span>Kata sandi baru</span><input class="inp" type="password" name="p1" minlength="6" autocomplete="new-password" required autofocus></label><label class="f"><span>Ulangi kata sandi baru</span><input class="inp" type="password" name="p2" minlength="6" autocomplete="new-password" required></label><button class="btn primary block" id="cpb">Simpan Kata Sandi</button></form>`,
@@ -94,13 +100,13 @@ async function logout(all) {
 async function afterAuth() {
   screen('<div class="loader"></div>');
   try { S.businesses = (await B().listBiz()).map(normalizeBiz); }
-  catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data.</b><br><span class="muted small">${esc(e.message)}</span></p><p class="small muted">Pastikan file <b>schema.sql</b> sudah dijalankan di Supabase SQL Editor.</p><button class="btn primary block" onclick="location.reload()">Coba lagi</button><button class="btn block mt" onclick="S.sb.auth.signOut().then(()=>location.reload())">Keluar</button></div>`); return; }
+  catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><p class="small muted">Pastikan file <b>schema.sql</b> sudah dijalankan di Supabase SQL Editor.</p><button class="btn primary block" onclick="location.reload()">Coba lagi</button><button class="btn block mt" onclick="S.sb.auth.signOut().then(()=>location.reload())">Keluar</button></div>`); return; }
   if (!S.businesses.length) return showWizard();
   const last = LS.get('bk_biz'); await openBiz(S.businesses.find(b => b.id === last) || S.businesses[0]);
 }
 async function openBiz(b) {
   S.biz = normalizeBiz(b); APP_TZ = S.biz.settings.tz || 'Asia/Jakarta'; LS.set('bk_biz', b.id); S.cart = []; screen('<div class="loader"></div>');
-  try { S.d = await B().load(b.id); } catch (e) { toast('Gagal memuat: ' + e.message, true); return; }
+  try { S.d = await B().load(b.id); } catch (e) { screen(`<div class="auth-card">${brandHTML()}<p><b>Gagal memuat data usaha.</b><br><span class="muted small">${esc(humanErr(e))}</span></p><button class="btn primary block" onclick="openBiz(S.businesses.find(x=>x.id==='${b.id}')||S.biz)">Coba lagi</button></div>`); return; }
   $('#screen').classList.add('hidden'); $('#app').classList.remove('hidden'); window.scrollTo(0, 0);
   shell(); if (!navAllowed(S.page)) S.page = 'dashboard'; render(); checkAlerts(true); Lock.check(true);
   if (S.mode === 'cloud' && notifSet().push && 'Notification' in window && Notification.permission === 'granted') subscribePush(true);
@@ -128,9 +134,10 @@ async function createBiz(e) {
   try {
     const res = await B().insert('businesses', [biz]); const saved = normalizeBiz((res && res[0]) || biz);
     S.businesses.push(saved); S.biz = saved; S.d = {}; TABLES.forEach(t => S.d[t] = []);
-    await seedBiz(T, parseMoney(f.cash), !!f.sample);
+    try { await seedBiz(T, parseMoney(f.cash), !!f.sample); }
+    catch (se) { try { await B().removeBiz(saved.id); } catch (_) {} S.businesses = S.businesses.filter(x => x.id !== saved.id); throw se; }
     await openBiz(saved); toast('Usaha "' + saved.name + '" siap digunakan 🎉');
-  } catch (err) { busy(b, false); toast('Gagal membuat usaha: ' + err.message, true); }
+  } catch (err) { busy(b, false); toast('Gagal membuat usaha: ' + humanErr(err), true); }
   return false;
 }
 async function seedBiz(T, cash, sample) {

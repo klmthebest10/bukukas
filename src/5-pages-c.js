@@ -129,8 +129,8 @@ async function applyTemplateExtras(type) {
     await updBiz({ settings: S.biz.settings });
   }, 'Template diterapkan');
 }
-async function setMod(k, v) { S.biz.settings.mods = { ...mods(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); shell(); render(); }
-async function setNotif(k, v) { S.biz.settings.notif = { ...notifSet(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); updateBell(); if (k === 'push') render(); }
+async function setMod(k, v) { if (mods()[k] === v) return; S.biz.settings.mods = { ...mods(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); shell(); render(); }
+async function setNotif(k, v) { if (notifSet()[k] === v) return; S.biz.settings.notif = { ...notifSet(), [k]: v }; await safe(() => updBiz({ settings: S.biz.settings })); updateBell(); if (k === 'push') render(); }
 async function testNotif() {
   if (!('Notification' in window) || Notification.permission !== 'granted') { const ok = await enablePush(); if (!ok) return; }
   if (S.mode === 'cloud' && (serverPush() || await subscribePush(false))) {

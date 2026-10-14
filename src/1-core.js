@@ -201,7 +201,8 @@ const Cloud = {
   async load(bizId) { const res = await Promise.all(TABLES.map(t => this.fetchAll(t, bizId))); const o = {}; TABLES.forEach((t, i) => o[t] = res[i]); return o; },
   async insert(t, rows) {
     const out = [];
-    for (let i = 0; i < rows.length; i += 500) { const { data, error } = await S.sb.from(t).insert(rows.slice(i, i + 500).map(strip)).select(); if (error) throw error; out.push(...(data || [])); }
+    /* upsert by id: aman bila permintaan diulang otomatis saat sinyal putus (tidak dobel) */
+    for (let i = 0; i < rows.length; i += 500) { const { data, error } = await S.sb.from(t).upsert(rows.slice(i, i + 500).map(strip), { onConflict: 'id' }).select(); if (error) throw error; out.push(...(data || [])); }
     return out;
   },
   async update(t, id, patch) { const { data, error } = await S.sb.from(t).update(strip(patch)).eq('id', id).select(); if (error) throw error; return data && data[0]; },
@@ -217,8 +218,37 @@ async function add(t, row) { const r = stamp(row); const res = await B().insert(
 async function addMany(t, rows) { if (!rows.length) return []; const rs = rows.map(stamp); const res = await B().insert(t, rs); const saved = (res && res.length) ? res : rs; S.d[t].push(...saved); dataChanged(); return saved; }
 async function upd(t, id, patch) { await B().update(t, id, patch); const r = S.d[t].find(x => x.id === id); if (r) Object.assign(r, patch); dataChanged(); return r; }
 async function del(t, id) { await B().remove(t, id); S.d[t] = S.d[t].filter(x => x.id !== id); dataChanged(); }
-async function updBiz(patch) { await B().update('businesses', S.biz.id, patch); Object.assign(S.biz, patch); }
-async function safe(fn, okMsg) { try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { console.error(e); toast('Gagal: ' + (e.message || e), true); return false; } }
+/* simpan pengaturan usaha berurutan (tidak saling menimpa) */
+let _bizQ = Promise.resolve();
+function updBiz(patch) { const id = S.biz.id; Object.assign(S.biz, patch); const p = _bizQ.then(() => B().update('businesses', id, patch)); _bizQ = p.catch(() => {}); return p; }
+/* terjemahkan pesan error teknis menjadi bahasa yang mudah dipahami */
+function humanErr(e) {
+  const m = String((e && (e.message || e.error_description)) || e || '');
+  if (/load failed|failed to fetch|networkerror|network request failed|fetch failed|timeout/i.test(m) || (typeof navigator !== 'undefined' && navigator.onLine === false)) return 'Koneksi internet terputus. Periksa sinyal / WiFi lalu coba lagi.';
+  if (/jwt expired|invalid jwt|not authenticated|refresh token/i.test(m)) return 'Sesi login berakhir. Silakan keluar lalu masuk lagi.';
+  if (/row-level security|permission denied/i.test(m)) return 'Akses ditolak. Coba keluar lalu masuk lagi.';
+  if (/duplicate key/i.test(m)) return 'Data ini sudah tersimpan.';
+  if (/invalid login credentials/i.test(m)) return 'Email atau kata sandi salah.';
+  if (/email not confirmed/i.test(m)) return 'Email belum dikonfirmasi. Buka email Anda dan klik link konfirmasi dulu.';
+  if (/user already registered|already been registered/i.test(m)) return 'Email ini sudah terdaftar. Silakan masuk.';
+  if (/rate limit|only request this after|too many/i.test(m)) return 'Terlalu sering mencoba. Tunggu sekitar 1 menit lalu coba lagi.';
+  if (/password should be at least|weak password/i.test(m)) return 'Kata sandi minimal 6 karakter.';
+  if (/unable to validate email|invalid email/i.test(m)) return 'Format email tidak valid.';
+  return m || 'Terjadi kesalahan';
+}
+async function safe(fn, okMsg) {
+  if (S.mode === 'cloud' && navigator.onLine === false) { toast('Tidak ada koneksi internet. Data belum tersimpan — coba lagi saat online.', true); return false; }
+  try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { console.error(e); toast('Gagal: ' + humanErr(e), true); return false; }
+}
+/* fetch dengan percobaan ulang otomatis saat sinyal putus sesaat */
+async function fetchRetry(input, init) {
+  for (let i = 0; ; i++) {
+    try { return await fetch(input, init); }
+    catch (e) { if (i >= 3 || (init && init.signal && init.signal.aborted)) throw e; await new Promise(r => setTimeout(r, 600 * (i + 1))); }
+  }
+}
+window.addEventListener('offline', () => { toast('⚠️ Anda sedang offline', true); const t = $('.topbar'); t && t.classList.add('is-offline'); });
+window.addEventListener('online', () => { toast('✅ Kembali online'); const t = $('.topbar'); t && t.classList.remove('is-offline'); });
 
 /* lookups */
 const byId = (t, id) => S.d[t].find(x => x.id === id);
