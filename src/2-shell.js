@@ -161,7 +161,7 @@ async function createBiz(e) {
   return false;
 }
 async function seedBiz(T, cash, sample) {
-  const accs = await addMany('accounts', [{ name: 'Kas Tunai', type: 'kas', opening_balance: cash, color: '#0d9488' }, { name: 'Rekening Bank', type: 'bank', opening_balance: 0, color: '#4f46e5' }, { name: 'E-Wallet / QRIS', type: 'ewallet', opening_balance: 0, color: '#d97706' }]);
+  const accs = await addMany('accounts', [{ name: 'Kas Toko', type: 'kas', opening_balance: cash, color: '#0d9488' }, { name: 'Bank Utama', type: 'bank', opening_balance: 0, color: '#4f46e5' }, { name: 'Dompet Digital', type: 'ewallet', opening_balance: 0, color: '#d97706' }]);
   let i = 0;
   const cs = await addMany('categories', [...T.inc.map(([n, e]) => ({ name: n, type: 'in', icon: e, color: PALETTE[i++ % 12] })), ...T.out.map(([n, e]) => ({ name: n, type: 'out', icon: e, color: PALETTE[i++ % 12] }))]);
   const prods = await addMany('products', T.products.map(p => ({ name: p[0], unit: p[1], buy_price: p[2], sell_price: p[3], stock: sample ? p[4] : 0, stock_base: sample ? p[4] : 0, min_stock: p[5], track_stock: p[6] !== false, active: true })));

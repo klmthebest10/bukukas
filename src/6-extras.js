@@ -11,15 +11,23 @@ const DEFAULT_LISTS = {
   units: ['pcs', 'kg', 'gram', 'liter', 'butir', 'ikat', 'pack', 'dus', 'karung', 'sak', 'peti', 'porsi', 'ekor', 'botol', 'jasa'],
   groups: [],
   ctypes: ['pelanggan', 'supplier', 'lainnya'],
+  atypes: [],
   reasons: ['Stock opname', 'Barang rusak / busuk', 'Susut', 'Hilang', 'Dipakai sendiri', 'Koreksi salah input']
 };
-const LIST_META = { units: ['Satuan produk', '⚖️', 'satuan'], groups: ['Kelompok produk', '🗂️', 'kelompok'], ctypes: ['Jenis kontak', '👥', 'jenis kontak'], reasons: ['Alasan sesuaikan stok', '📝', 'alasan'] };
+const LIST_META = { units: ['Satuan produk', '⚖️', 'satuan'], groups: ['Kelompok produk', '🗂️', 'kelompok'], atypes: ['Jenis akun', '🏦', 'jenis akun'], ctypes: ['Jenis kontak', '👥', 'jenis kontak'], reasons: ['Alasan sesuaikan stok', '📝', 'alasan'] };
+/* nilai bawaan yang selalu ada & tidak bisa diubah/dihapus (jenis akun bawaan) */
+const LIST_FIXED = { atypes: () => Object.keys(ACC_BUILTIN) };
+const listLabel = (k, v) => k === 'atypes' ? accTypeLabel(v) : v;
 function listGet(k) { const l = ((S.biz && S.biz.settings.lists) || {})[k]; return Array.isArray(l) ? l : [...DEFAULT_LISTS[k]]; }
-function listItems(k) { return k === 'groups' ? [...new Set([...listGet('groups'), ...S.d.products.map(p => p.group_name).filter(Boolean)])] : listGet(k); }
+function listItems(k) {
+  if (k === 'groups') return [...new Set([...listGet('groups'), ...S.d.products.map(p => p.group_name).filter(Boolean)])];
+  if (k === 'atypes') return [...new Set([...listGet('atypes'), ...S.d.accounts.map(a => a.type).filter(t => t && !ACC_BUILTIN[t])])];
+  return listGet(k);
+}
 async function listSave(k, arr) { S.biz.settings.lists = { ...(S.biz.settings.lists || {}), [k]: arr }; await updBiz({ settings: S.biz.settings }); }
-function listUsage(k, v) { return k === 'units' ? S.d.products.filter(p => p.unit === v).length : k === 'groups' ? S.d.products.filter(p => p.group_name === v).length : k === 'ctypes' ? S.d.contacts.filter(c => c.type === v).length : 0; }
-const LIST_FIELD = { units: ['products', 'unit'], groups: ['products', 'group_name'], ctypes: ['contacts', 'type'] };
-async function listAdd(k, v) { v = String(v || '').trim(); if (!v) return; const l = listItems(k); if (l.some(x => x.toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada', true); await safe(() => listSave(k, [...l, v]), 'Ditambahkan'); render(); }
+function listUsage(k, v) { return k === 'atypes' ? S.d.accounts.filter(a => a.type === v).length : k === 'units' ? S.d.products.filter(p => p.unit === v).length : k === 'groups' ? S.d.products.filter(p => p.group_name === v).length : k === 'ctypes' ? S.d.contacts.filter(c => c.type === v).length : 0; }
+const LIST_FIELD = { units: ['products', 'unit'], groups: ['products', 'group_name'], atypes: ['accounts', 'type'], ctypes: ['contacts', 'type'] };
+async function listAdd(k, v) { v = String(v || '').trim(); if (!v) return; const l = listItems(k); if (LIST_FIXED[k] && LIST_FIXED[k]().some(x => x.toLowerCase() === v.toLowerCase() || listLabel(k, x).toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada sebagai bawaan', true); if (l.some(x => x.toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada', true); await safe(() => listSave(k, [...l, v]), 'Ditambahkan'); render(); }
 function listEdit(k, i) {
   const l = listItems(k), old = l[i];
   modal('Ubah ' + LIST_META[k][2], `<form id="lef"><label class="f"><span>Nama</span><input class="inp" name="v" value="${esc(old)}" required autofocus maxlength="40"></label>${listUsage(k, old) ? `<p class="xs muted">${listUsage(k, old)} data yang memakai "${esc(old)}" akan ikut diperbarui.</p>` : ''}</form>`,
@@ -32,6 +40,7 @@ function listEdit(k, i) {
 }
 function listDel(k, i) {
   const l = listItems(k), v = l[i], n = listUsage(k, v);
+  if (k === 'atypes' && n) return toast('Jenis "' + v + '" masih dipakai ' + n + ' akun. Ubah jenis akunnya dulu.', true);
   confirmBox(`Hapus <b>${esc(v)}</b> dari daftar ${LIST_META[k][0].toLowerCase()}?` + (n ? (k === 'groups' ? ` <b>${n} produk</b> akan menjadi tanpa kelompok.` : ` ${n} data yang sudah memakainya tidak berubah.`) : ''), async () => {
     await safe(async () => { if (k === 'groups') for (const p of S.d.products.filter(p => p.group_name === v)) await upd('products', p.id, { group_name: null }); await listSave(k, l.filter((_, j) => j !== i)); }, 'Dihapus');
     render(); });
@@ -39,10 +48,10 @@ function listDel(k, i) {
 /* Dropdown pilihan dari daftar + "Tambah baru" (langsung masuk ke daftar & tersimpan, juga saat offline) */
 function listPick(name, k, value, opt = {}) {
   value = value == null ? '' : String(value);
-  const items = listItems(k), all = value && !items.includes(value) ? [...items, value] : items, id = 'lp_' + name;
+  const fixed = LIST_FIXED[k] ? LIST_FIXED[k]() : [], items = [...fixed, ...listItems(k).filter(v => !fixed.includes(v))], all = value && !items.includes(value) ? [...items, value] : items, id = 'lp_' + name;
   return `<div class="lpick" id="${id}"><select class="inp" name="${esc(name)}" data-k="${k}" data-prev="${esc(value)}" onchange="lpChange(this)">
     ${opt.empty ? `<option value="" ${!value ? 'selected' : ''}>${esc(opt.empty)}</option>` : ''}
-    ${all.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+    ${all.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(listLabel(k, v))}</option>`).join('')}
     <option value="__new">➕ Tambah ${esc(LIST_META[k][2])} baru…</option></select>
     <div class="lp-new" hidden><input class="inp" maxlength="40" placeholder="Nama ${esc(LIST_META[k][2])} baru" onkeydown="if(event.key==='Enter'){event.preventDefault();lpAdd('${id}')}else if(event.key==='Escape'){event.preventDefault();lpCancel('${id}')}">
     <button type="button" class="btn primary sm" onclick="lpAdd('${id}')">Tambah</button><button type="button" class="icon-btn" title="Batal" aria-label="Batal" onclick="lpCancel('${id}')">${ic('x')}</button></div></div>`;
@@ -57,13 +66,13 @@ async function lpAdd(id) {
   const box = document.getElementById(id); if (!box) return;
   const sel = box.querySelector('select'), inp = box.querySelector('.lp-new input'), k = sel.dataset.k, v = inp.value.trim().replace(/\s+/g, ' ');
   if (!v) { toast('Isi nama ' + LIST_META[k][2] + ' baru', true); return inp.focus(); }
-  const l = listItems(k), hit = l.find(x => x.toLowerCase() === v.toLowerCase());
+  const l = listItems(k), hit = [...(LIST_FIXED[k] ? LIST_FIXED[k]() : []), ...l].find(x => x.toLowerCase() === v.toLowerCase() || listLabel(k, x).toLowerCase() === v.toLowerCase());
   const pick = val => {
     let o = [...sel.options].find(o => o.value === val);
-    if (!o) { o = new Option(val, val); sel.insertBefore(o, sel.querySelector('option[value="__new"]')); }
+    if (!o) { o = new Option(listLabel(k, val), val); sel.insertBefore(o, sel.querySelector('option[value="__new"]')); }
     sel.value = val; sel.dataset.prev = val; box.querySelector('.lp-new').hidden = true;
   };
-  if (hit) { pick(hit); return toast('"' + hit + '" sudah ada di daftar — dipilih'); }
+  if (hit) { pick(hit); return toast('"' + listLabel(k, hit) + '" sudah ada di daftar — dipilih'); }
   const ok = await safe(async () => { await listSave(k, [...l, v]); return true; }, '"' + v + '" ditambahkan ke daftar ' + LIST_META[k][2]);
   if (ok) pick(v);
 }
@@ -207,9 +216,11 @@ PAGES.pengaturan = {
         <div class="f-row"><label class="f"><span>No HP usaha</span><input class="inp" name="phone" value="${esc(b.phone || '')}"></label><label class="f"><span>Alamat (tampil di struk)</span><input class="inp" name="address" value="${esc(b.address || '')}"></label></div>
         <button class="btn primary">${ic('check')} Simpan Profil</button></form></div>`,
       fitur: () => `<div class="card"><div class="card-h"><h3>🧩 Fitur yang Ditampilkan</h3></div>${Object.entries(MODULES).map(([k, [l, d]]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, m[k], 'setMod')}</div>`).join('')}</div>`,
-      akun: () => `<div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><div class="row gap-s"><button class="btn sm" onclick="balanceAll()">⚖️ Ubah saldo</button><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div></div>
-        ${S.d.accounts.map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${iconH(accIcon(a))}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><button type="button" class="xs" style="background:none;border:0;padding:0;color:var(--primary);font-weight:700;cursor:pointer" onclick="balanceForm('${a.id}')">Saldo <span class="num">${money(accBalance(a))}</span> ✎</button></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')}
-      <p class="xs muted" style="margin:10px 2px 0">Ketuk <b>Saldo ✎</b> untuk mengubah saldo satu akun, atau <b>⚖️ Ubah saldo</b> untuk menyesuaikan beberapa akun sekaligus. Perubahan dicatat sebagai transaksi penyesuaian agar riwayat tetap rapi.</p></div>`,
+      akun: () => { const groups = [...new Set([...Object.keys(ACC_BUILTIN), ...S.d.accounts.map(a => a.type)])].filter(t => S.d.accounts.some(a => a.type === t));
+        return `<div class="card"><div class="card-h"><h3>💳 Akun Keuangan</h3><div class="row gap-s"><button class="btn sm" onclick="balanceAll()">⚖️ Ubah saldo</button><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div></div>
+        <div class="acc-explain"><div><b>Nama akun</b><small>Sebutan Anda sendiri — cth: <i>Kas Laci</i>, <i>BRI a.n. Toko</i>, <i>DANA Istri</i></small></div><div><b>Jenis akun</b><small>Golongannya — Kas / Tunai, Bank, E-Wallet, atau jenis buatan Anda</small></div></div>
+        ${groups.map(t => `<div class="acc-grp"><span>${iconH((ACC_BUILTIN[t] || [])[1] || '💳')} ${esc(accTypeLabel(t))}</span><small>${money(S.d.accounts.filter(a => a.type === t).reduce((x, a) => x + accBalance(a), 0))}</small></div>` + S.d.accounts.filter(a => a.type === t).map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${iconH(accIcon(a))}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><button type="button" class="xs" style="background:none;border:0;padding:0;color:var(--primary);font-weight:700;cursor:pointer" onclick="balanceForm('${a.id}')">Saldo <span class="num">${money(accBalance(a))}</span> ✎</button></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')).join('')}
+        <div class="row between wrap mt" style="gap:8px"><p class="xs muted" style="margin:0;flex:1 1 220px">Ketuk ✏️ untuk mengganti nama, jenis, ikon atau warna akun. <b>Saldo ✎</b> mengubah saldo satu akun; <b>⚖️ Ubah saldo</b> untuk beberapa akun sekaligus (dicatat sebagai transaksi penyesuaian).</p><button class="btn sm" onclick="S.setTab='atypes';openSet('daftar')">🏦 Kelola jenis akun</button></div></div>`; },
       kategori: () => `<div class="card"><div class="card-h"><h3>🏷️ Kategori</h3><button class="btn sm primary" onclick="catForm(null,S.catTab)">${ic('plus')} Kategori</button></div>
         <div class="seg"><button class="${S.catTab === 'in' ? 'on in' : ''}" onclick="S.catTab='in';render()">⬆ Pemasukan (${cats('in').length})</button><button class="${S.catTab === 'out' ? 'on out' : ''}" onclick="S.catTab='out';render()">⬇ Pengeluaran (${cats('out').length})</button></div>
         ${cats(S.catTab).map(c => `<div class="opt-row"><span class="av" style="width:38px;height:38px;font-size:17px;background:${c.color || '#888'}26">${iconH(c.icon, '🏷️')}</span><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(c.name)}</b><span class="xs muted">${catCount(c.id)} transaksi</span></div>${rowBtns(`catForm('${c.id}')`, `deleteCat('${c.id}')`)}</div>`).join('') || '<p class="muted small">Belum ada kategori.</p>'}
@@ -255,6 +266,7 @@ function listsCard() {
   return `<div class="card" id="set-lists"><div class="card-h"><h3>📝 Daftar Pilihan</h3><button class="btn sm ghost" onclick="listReset('${k}')">Kembalikan bawaan</button></div>
     <div class="chips mb">${Object.entries(LIST_META).map(([key, [l, em]]) => `<button class="chip ${k === key ? 'on' : ''}" onclick="S.setTab='${key}';render();setTimeout(()=>{const x=document.getElementById('set-lists');x&&x.scrollIntoView({block:'nearest'})},60)">${em} ${l}</button>`).join('')}</div>
     <form class="row mb" onsubmit="event.preventDefault();listAdd('${k}',this.v.value)"><input class="inp" name="v" placeholder="Tambah ${word} baru…" maxlength="40"><button class="btn primary" aria-label="Tambah">${ic('plus')}</button></form>
-    ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
+    ${LIST_FIXED[k] ? LIST_FIXED[k]().map(v => `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(listLabel(k, v))}</span>${listUsage(k, v) ? `<span class="pill neutral">${listUsage(k, v)} dipakai</span>` : ''}<span class="pill" title="Jenis bawaan tidak bisa diubah/dihapus">${ic('lock')} bawaan</span></div>`).join('') : ''}
+    ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : LIST_FIXED[k] ? `<p class="xs muted">Belum ada ${word} tambahan. Contoh: Koperasi, Tabungan Emas, Kas Kecil Gudang.</p>` : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
 }
 

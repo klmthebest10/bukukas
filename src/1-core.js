@@ -327,7 +327,10 @@ function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'ad
 /* ikon: emoji ATAU gambar kecil (data URL hasil kompres dari perangkat) */
 const isImgIcon = v => typeof v === 'string' && /^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(v);
 const iconH = (v, fb = '🏷️') => isImgIcon(v) ? `<img class="ico-img" src="${v}" alt="">` : esc(v || fb);
-const accIcon = a => a && a.icon ? a.icon : a && a.type === 'bank' ? '🏦' : a && a.type === 'ewallet' ? '📱' : '💵';
+/* jenis akun: 3 bawaan (kunci tetap, dipakai logika kasir) + jenis buatan pengguna (teks bebas) */
+const ACC_BUILTIN = { kas: ['Kas / Tunai', '💵'], bank: ['Bank', '🏦'], ewallet: ['E-Wallet / QRIS', '📱'] };
+const accTypeLabel = t => (ACC_BUILTIN[t] || [])[0] || t || 'Lainnya';
+const accIcon = a => a && a.icon ? a.icon : ((ACC_BUILTIN[a && a.type] || [])[1] || '💳');
 function compressIcon(file, size = 128) {
   return new Promise((res, rej) => {
     if (!file || !/^image\//.test(file.type || 'image/')) return rej(new Error('File harus berupa gambar'));
@@ -406,7 +409,7 @@ function togglePrivacy() { LS.set('bk_privacy', !LS.get('bk_privacy', false)); a
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------------- PWA ---------------- */
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 /* Pembaruan otomatis: cek versi baru saat dibuka, saat kembali ke aplikasi & tiap 30 menit.
    Begitu versi baru aktif, aplikasi memuat ulang sendiri (antrean offline aman di IndexedDB). */
 const Upd = { reg: null, ready: false, reloading: false };

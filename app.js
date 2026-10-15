@@ -327,7 +327,10 @@ function txIcon(t) { if (t.type === 'transfer') return '🔁'; if (t.ref === 'ad
 /* ikon: emoji ATAU gambar kecil (data URL hasil kompres dari perangkat) */
 const isImgIcon = v => typeof v === 'string' && /^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(v);
 const iconH = (v, fb = '🏷️') => isImgIcon(v) ? `<img class="ico-img" src="${v}" alt="">` : esc(v || fb);
-const accIcon = a => a && a.icon ? a.icon : a && a.type === 'bank' ? '🏦' : a && a.type === 'ewallet' ? '📱' : '💵';
+/* jenis akun: 3 bawaan (kunci tetap, dipakai logika kasir) + jenis buatan pengguna (teks bebas) */
+const ACC_BUILTIN = { kas: ['Kas / Tunai', '💵'], bank: ['Bank', '🏦'], ewallet: ['E-Wallet / QRIS', '📱'] };
+const accTypeLabel = t => (ACC_BUILTIN[t] || [])[0] || t || 'Lainnya';
+const accIcon = a => a && a.icon ? a.icon : ((ACC_BUILTIN[a && a.type] || [])[1] || '💳');
 function compressIcon(file, size = 128) {
   return new Promise((res, rej) => {
     if (!file || !/^image\//.test(file.type || 'image/')) return rej(new Error('File harus berupa gambar'));
@@ -406,7 +409,7 @@ function togglePrivacy() { LS.set('bk_privacy', !LS.get('bk_privacy', false)); a
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------------- PWA ---------------- */
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 /* Pembaruan otomatis: cek versi baru saat dibuka, saat kembali ke aplikasi & tiap 30 menit.
    Begitu versi baru aktif, aplikasi memuat ulang sendiri (antrean offline aman di IndexedDB). */
 const Upd = { reg: null, ready: false, reloading: false };
@@ -622,7 +625,7 @@ async function createBiz(e) {
   return false;
 }
 async function seedBiz(T, cash, sample) {
-  const accs = await addMany('accounts', [{ name: 'Kas Tunai', type: 'kas', opening_balance: cash, color: '#0d9488' }, { name: 'Rekening Bank', type: 'bank', opening_balance: 0, color: '#4f46e5' }, { name: 'E-Wallet / QRIS', type: 'ewallet', opening_balance: 0, color: '#d97706' }]);
+  const accs = await addMany('accounts', [{ name: 'Kas Toko', type: 'kas', opening_balance: cash, color: '#0d9488' }, { name: 'Bank Utama', type: 'bank', opening_balance: 0, color: '#4f46e5' }, { name: 'Dompet Digital', type: 'ewallet', opening_balance: 0, color: '#d97706' }]);
   let i = 0;
   const cs = await addMany('categories', [...T.inc.map(([n, e]) => ({ name: n, type: 'in', icon: e, color: PALETTE[i++ % 12] })), ...T.out.map(([n, e]) => ({ name: n, type: 'out', icon: e, color: PALETTE[i++ % 12] }))]);
   const prods = await addMany('products', T.products.map(p => ({ name: p[0], unit: p[1], buy_price: p[2], sell_price: p[3], stock: sample ? p[4] : 0, stock_base: sample ? p[4] : 0, min_stock: p[5], track_stock: p[6] !== false, active: true })));
@@ -1671,13 +1674,13 @@ function balanceAll() {
 function baCalc() { const f = formObj($('#baf')); $('#baTot').textContent = money(sum(S.d.accounts, a => f['b_' + a.id] === '' ? accBalance(a) : parseMoney(f['b_' + a.id]))); }
 function accountForm(id) {
   const a = id ? acc(id) : { name: '', type: 'kas', opening_balance: '', color: PALETTE[S.d.accounts.length % 12] };
-  modal(id ? 'Edit Akun' : 'Akun Baru', `<form id="af"><label class="f"><span>Nama akun</span><input class="inp" name="name" value="${esc(a.name)}" placeholder="cth: Kas Laci, BRI, DANA" required autofocus></label>
+  modal(id ? 'Edit Akun' : 'Akun Baru', `<form id="af"><label class="f"><span>Nama akun</span><input class="inp" name="name" value="${esc(a.name)}" placeholder="cth: Kas Laci, BRI a.n. Toko, DANA" required autofocus maxlength="40"><small class="xs muted" style="display:block;margin-top:5px">Nama bebas sesuai sebutan Anda. Jenis di bawah hanya golongannya.</small></label>
     <div class="f"><span>Ikon / logo (opsional)</span>${iconField('icon', a.icon, accIcon({ type: a.type }))}</div>
-    <div class="f-row"><label class="f"><span>Jenis</span><select class="inp" name="type">${[['kas', 'Kas tunai'], ['bank', 'Bank'], ['ewallet', 'E-Wallet / QRIS']].map(([k, l]) => `<option value="${k}" ${a.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${a.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
+    <div class="f-row"><div class="f"><span>Jenis akun</span>${listPick('type', 'atypes', a.type || 'kas')}</div><label class="f"><span>Warna</span><input class="inp" type="color" name="color" value="${a.color || '#0d9488'}" style="height:46px;padding:4px"></label></div>
     ${id ? `<div class="card mb" style="padding:12px;background:var(--surface-2)"><div class="row between"><div><div class="xs muted">Saldo saat ini</div><b class="num" style="font-size:18px">${money(accBalance(a))}</b></div><button type="button" class="btn sm primary" onclick="balanceForm('${id}')">${ic('edit')} Ubah saldo</button></div></div>` : ''}
     <label class="f"><span>Saldo awal${id ? ' (saldo saat akun dibuat)' : ''}</span>${moneyInput('opening_balance', a.opening_balance)}</label>${id ? '<p class="xs muted" style="margin-top:-6px">Mengubah saldo awal ikut menggeser saldo di semua periode laporan.</p>' : ''}</form>`,
     { foot: `${id ? `<button class="btn danger" onclick="deleteAccount('${id}')">${ic('trash')}</button>` : '<button class="btn" onclick="closeModal()">Batal</button>'}<button class="btn primary" id="afs">Simpan</button>`,
-      onMount: m => m.querySelector('#afs').onclick = async () => { const f = formObj($('#af')); if (!f.name.trim()) return toast('Nama wajib diisi', true); const row = { name: f.name.trim(), type: f.type, color: f.color, icon: (f.icon || '').trim() || null, opening_balance: parseMoney(f.opening_balance) };
+      onMount: m => m.querySelector('#afs').onclick = async () => { const f = formObj($('#af')); if (!f.name.trim()) return toast('Nama wajib diisi', true); if (S.d.accounts.some(x => x.id !== id && x.name.trim().toLowerCase() === f.name.trim().toLowerCase())) return toast('Nama akun sudah dipakai, buat nama yang berbeda', true); const row = { name: f.name.trim(), type: f.type || 'kas', color: f.color, icon: (f.icon || '').trim() || null, opening_balance: parseMoney(f.opening_balance) };
         const ok = await safe(async () => { if (id) await upd('accounts', id, row); else await add('accounts', row); return true; }, 'Akun disimpan'); if (ok) { closeModal(); render(); } } });
 }
 function deleteAccount(id) { if (S.d.transactions.some(t => t.account_id === id || t.to_account_id === id)) return toast('Akun sudah punya transaksi, tidak bisa dihapus', true); if (S.d.accounts.length <= 1) return toast('Minimal harus ada 1 akun', true); confirmBox('Hapus akun ini?', async () => { await safe(() => del('accounts', id), 'Akun dihapus'); render(); }); }
@@ -1762,15 +1765,23 @@ const DEFAULT_LISTS = {
   units: ['pcs', 'kg', 'gram', 'liter', 'butir', 'ikat', 'pack', 'dus', 'karung', 'sak', 'peti', 'porsi', 'ekor', 'botol', 'jasa'],
   groups: [],
   ctypes: ['pelanggan', 'supplier', 'lainnya'],
+  atypes: [],
   reasons: ['Stock opname', 'Barang rusak / busuk', 'Susut', 'Hilang', 'Dipakai sendiri', 'Koreksi salah input']
 };
-const LIST_META = { units: ['Satuan produk', '⚖️', 'satuan'], groups: ['Kelompok produk', '🗂️', 'kelompok'], ctypes: ['Jenis kontak', '👥', 'jenis kontak'], reasons: ['Alasan sesuaikan stok', '📝', 'alasan'] };
+const LIST_META = { units: ['Satuan produk', '⚖️', 'satuan'], groups: ['Kelompok produk', '🗂️', 'kelompok'], atypes: ['Jenis akun', '🏦', 'jenis akun'], ctypes: ['Jenis kontak', '👥', 'jenis kontak'], reasons: ['Alasan sesuaikan stok', '📝', 'alasan'] };
+/* nilai bawaan yang selalu ada & tidak bisa diubah/dihapus (jenis akun bawaan) */
+const LIST_FIXED = { atypes: () => Object.keys(ACC_BUILTIN) };
+const listLabel = (k, v) => k === 'atypes' ? accTypeLabel(v) : v;
 function listGet(k) { const l = ((S.biz && S.biz.settings.lists) || {})[k]; return Array.isArray(l) ? l : [...DEFAULT_LISTS[k]]; }
-function listItems(k) { return k === 'groups' ? [...new Set([...listGet('groups'), ...S.d.products.map(p => p.group_name).filter(Boolean)])] : listGet(k); }
+function listItems(k) {
+  if (k === 'groups') return [...new Set([...listGet('groups'), ...S.d.products.map(p => p.group_name).filter(Boolean)])];
+  if (k === 'atypes') return [...new Set([...listGet('atypes'), ...S.d.accounts.map(a => a.type).filter(t => t && !ACC_BUILTIN[t])])];
+  return listGet(k);
+}
 async function listSave(k, arr) { S.biz.settings.lists = { ...(S.biz.settings.lists || {}), [k]: arr }; await updBiz({ settings: S.biz.settings }); }
-function listUsage(k, v) { return k === 'units' ? S.d.products.filter(p => p.unit === v).length : k === 'groups' ? S.d.products.filter(p => p.group_name === v).length : k === 'ctypes' ? S.d.contacts.filter(c => c.type === v).length : 0; }
-const LIST_FIELD = { units: ['products', 'unit'], groups: ['products', 'group_name'], ctypes: ['contacts', 'type'] };
-async function listAdd(k, v) { v = String(v || '').trim(); if (!v) return; const l = listItems(k); if (l.some(x => x.toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada', true); await safe(() => listSave(k, [...l, v]), 'Ditambahkan'); render(); }
+function listUsage(k, v) { return k === 'atypes' ? S.d.accounts.filter(a => a.type === v).length : k === 'units' ? S.d.products.filter(p => p.unit === v).length : k === 'groups' ? S.d.products.filter(p => p.group_name === v).length : k === 'ctypes' ? S.d.contacts.filter(c => c.type === v).length : 0; }
+const LIST_FIELD = { units: ['products', 'unit'], groups: ['products', 'group_name'], atypes: ['accounts', 'type'], ctypes: ['contacts', 'type'] };
+async function listAdd(k, v) { v = String(v || '').trim(); if (!v) return; const l = listItems(k); if (LIST_FIXED[k] && LIST_FIXED[k]().some(x => x.toLowerCase() === v.toLowerCase() || listLabel(k, x).toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada sebagai bawaan', true); if (l.some(x => x.toLowerCase() === v.toLowerCase())) return toast('"' + v + '" sudah ada', true); await safe(() => listSave(k, [...l, v]), 'Ditambahkan'); render(); }
 function listEdit(k, i) {
   const l = listItems(k), old = l[i];
   modal('Ubah ' + LIST_META[k][2], `<form id="lef"><label class="f"><span>Nama</span><input class="inp" name="v" value="${esc(old)}" required autofocus maxlength="40"></label>${listUsage(k, old) ? `<p class="xs muted">${listUsage(k, old)} data yang memakai "${esc(old)}" akan ikut diperbarui.</p>` : ''}</form>`,
@@ -1783,6 +1794,7 @@ function listEdit(k, i) {
 }
 function listDel(k, i) {
   const l = listItems(k), v = l[i], n = listUsage(k, v);
+  if (k === 'atypes' && n) return toast('Jenis "' + v + '" masih dipakai ' + n + ' akun. Ubah jenis akunnya dulu.', true);
   confirmBox(`Hapus <b>${esc(v)}</b> dari daftar ${LIST_META[k][0].toLowerCase()}?` + (n ? (k === 'groups' ? ` <b>${n} produk</b> akan menjadi tanpa kelompok.` : ` ${n} data yang sudah memakainya tidak berubah.`) : ''), async () => {
     await safe(async () => { if (k === 'groups') for (const p of S.d.products.filter(p => p.group_name === v)) await upd('products', p.id, { group_name: null }); await listSave(k, l.filter((_, j) => j !== i)); }, 'Dihapus');
     render(); });
@@ -1790,10 +1802,10 @@ function listDel(k, i) {
 /* Dropdown pilihan dari daftar + "Tambah baru" (langsung masuk ke daftar & tersimpan, juga saat offline) */
 function listPick(name, k, value, opt = {}) {
   value = value == null ? '' : String(value);
-  const items = listItems(k), all = value && !items.includes(value) ? [...items, value] : items, id = 'lp_' + name;
+  const fixed = LIST_FIXED[k] ? LIST_FIXED[k]() : [], items = [...fixed, ...listItems(k).filter(v => !fixed.includes(v))], all = value && !items.includes(value) ? [...items, value] : items, id = 'lp_' + name;
   return `<div class="lpick" id="${id}"><select class="inp" name="${esc(name)}" data-k="${k}" data-prev="${esc(value)}" onchange="lpChange(this)">
     ${opt.empty ? `<option value="" ${!value ? 'selected' : ''}>${esc(opt.empty)}</option>` : ''}
-    ${all.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+    ${all.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(listLabel(k, v))}</option>`).join('')}
     <option value="__new">➕ Tambah ${esc(LIST_META[k][2])} baru…</option></select>
     <div class="lp-new" hidden><input class="inp" maxlength="40" placeholder="Nama ${esc(LIST_META[k][2])} baru" onkeydown="if(event.key==='Enter'){event.preventDefault();lpAdd('${id}')}else if(event.key==='Escape'){event.preventDefault();lpCancel('${id}')}">
     <button type="button" class="btn primary sm" onclick="lpAdd('${id}')">Tambah</button><button type="button" class="icon-btn" title="Batal" aria-label="Batal" onclick="lpCancel('${id}')">${ic('x')}</button></div></div>`;
@@ -1808,13 +1820,13 @@ async function lpAdd(id) {
   const box = document.getElementById(id); if (!box) return;
   const sel = box.querySelector('select'), inp = box.querySelector('.lp-new input'), k = sel.dataset.k, v = inp.value.trim().replace(/\s+/g, ' ');
   if (!v) { toast('Isi nama ' + LIST_META[k][2] + ' baru', true); return inp.focus(); }
-  const l = listItems(k), hit = l.find(x => x.toLowerCase() === v.toLowerCase());
+  const l = listItems(k), hit = [...(LIST_FIXED[k] ? LIST_FIXED[k]() : []), ...l].find(x => x.toLowerCase() === v.toLowerCase() || listLabel(k, x).toLowerCase() === v.toLowerCase());
   const pick = val => {
     let o = [...sel.options].find(o => o.value === val);
-    if (!o) { o = new Option(val, val); sel.insertBefore(o, sel.querySelector('option[value="__new"]')); }
+    if (!o) { o = new Option(listLabel(k, val), val); sel.insertBefore(o, sel.querySelector('option[value="__new"]')); }
     sel.value = val; sel.dataset.prev = val; box.querySelector('.lp-new').hidden = true;
   };
-  if (hit) { pick(hit); return toast('"' + hit + '" sudah ada di daftar — dipilih'); }
+  if (hit) { pick(hit); return toast('"' + listLabel(k, hit) + '" sudah ada di daftar — dipilih'); }
   const ok = await safe(async () => { await listSave(k, [...l, v]); return true; }, '"' + v + '" ditambahkan ke daftar ' + LIST_META[k][2]);
   if (ok) pick(v);
 }
@@ -1958,9 +1970,11 @@ PAGES.pengaturan = {
         <div class="f-row"><label class="f"><span>No HP usaha</span><input class="inp" name="phone" value="${esc(b.phone || '')}"></label><label class="f"><span>Alamat (tampil di struk)</span><input class="inp" name="address" value="${esc(b.address || '')}"></label></div>
         <button class="btn primary">${ic('check')} Simpan Profil</button></form></div>`,
       fitur: () => `<div class="card"><div class="card-h"><h3>🧩 Fitur yang Ditampilkan</h3></div>${Object.entries(MODULES).map(([k, [l, d]]) => `<div class="set-row"><div class="t grow"><b>${l}</b><small>${d}</small></div>${sw(k, m[k], 'setMod')}</div>`).join('')}</div>`,
-      akun: () => `<div class="card"><div class="card-h"><h3>💳 Akun Kas, Bank & E-Wallet</h3><div class="row gap-s"><button class="btn sm" onclick="balanceAll()">⚖️ Ubah saldo</button><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div></div>
-        ${S.d.accounts.map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${iconH(accIcon(a))}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><button type="button" class="xs" style="background:none;border:0;padding:0;color:var(--primary);font-weight:700;cursor:pointer" onclick="balanceForm('${a.id}')">Saldo <span class="num">${money(accBalance(a))}</span> ✎</button></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')}
-      <p class="xs muted" style="margin:10px 2px 0">Ketuk <b>Saldo ✎</b> untuk mengubah saldo satu akun, atau <b>⚖️ Ubah saldo</b> untuk menyesuaikan beberapa akun sekaligus. Perubahan dicatat sebagai transaksi penyesuaian agar riwayat tetap rapi.</p></div>`,
+      akun: () => { const groups = [...new Set([...Object.keys(ACC_BUILTIN), ...S.d.accounts.map(a => a.type)])].filter(t => S.d.accounts.some(a => a.type === t));
+        return `<div class="card"><div class="card-h"><h3>💳 Akun Keuangan</h3><div class="row gap-s"><button class="btn sm" onclick="balanceAll()">⚖️ Ubah saldo</button><button class="btn sm primary" onclick="accountForm()">${ic('plus')} Akun</button></div></div>
+        <div class="acc-explain"><div><b>Nama akun</b><small>Sebutan Anda sendiri — cth: <i>Kas Laci</i>, <i>BRI a.n. Toko</i>, <i>DANA Istri</i></small></div><div><b>Jenis akun</b><small>Golongannya — Kas / Tunai, Bank, E-Wallet, atau jenis buatan Anda</small></div></div>
+        ${groups.map(t => `<div class="acc-grp"><span>${iconH((ACC_BUILTIN[t] || [])[1] || '💳')} ${esc(accTypeLabel(t))}</span><small>${money(S.d.accounts.filter(a => a.type === t).reduce((x, a) => x + accBalance(a), 0))}</small></div>` + S.d.accounts.filter(a => a.type === t).map(a => `<div class="opt-row"><div class="av" style="width:38px;height:38px;font-size:16px">${iconH(accIcon(a))}</div><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(a.name)}</b><button type="button" class="xs" style="background:none;border:0;padding:0;color:var(--primary);font-weight:700;cursor:pointer" onclick="balanceForm('${a.id}')">Saldo <span class="num">${money(accBalance(a))}</span> ✎</button></div>${rowBtns(`accountForm('${a.id}')`, `deleteAccount('${a.id}')`)}</div>`).join('')).join('')}
+        <div class="row between wrap mt" style="gap:8px"><p class="xs muted" style="margin:0;flex:1 1 220px">Ketuk ✏️ untuk mengganti nama, jenis, ikon atau warna akun. <b>Saldo ✎</b> mengubah saldo satu akun; <b>⚖️ Ubah saldo</b> untuk beberapa akun sekaligus (dicatat sebagai transaksi penyesuaian).</p><button class="btn sm" onclick="S.setTab='atypes';openSet('daftar')">🏦 Kelola jenis akun</button></div></div>`; },
       kategori: () => `<div class="card"><div class="card-h"><h3>🏷️ Kategori</h3><button class="btn sm primary" onclick="catForm(null,S.catTab)">${ic('plus')} Kategori</button></div>
         <div class="seg"><button class="${S.catTab === 'in' ? 'on in' : ''}" onclick="S.catTab='in';render()">⬆ Pemasukan (${cats('in').length})</button><button class="${S.catTab === 'out' ? 'on out' : ''}" onclick="S.catTab='out';render()">⬇ Pengeluaran (${cats('out').length})</button></div>
         ${cats(S.catTab).map(c => `<div class="opt-row"><span class="av" style="width:38px;height:38px;font-size:17px;background:${c.color || '#888'}26">${iconH(c.icon, '🏷️')}</span><div class="grow" style="min-width:0"><b class="ell" style="display:block;font-size:14px">${esc(c.name)}</b><span class="xs muted">${catCount(c.id)} transaksi</span></div>${rowBtns(`catForm('${c.id}')`, `deleteCat('${c.id}')`)}</div>`).join('') || '<p class="muted small">Belum ada kategori.</p>'}
@@ -2006,7 +2020,8 @@ function listsCard() {
   return `<div class="card" id="set-lists"><div class="card-h"><h3>📝 Daftar Pilihan</h3><button class="btn sm ghost" onclick="listReset('${k}')">Kembalikan bawaan</button></div>
     <div class="chips mb">${Object.entries(LIST_META).map(([key, [l, em]]) => `<button class="chip ${k === key ? 'on' : ''}" onclick="S.setTab='${key}';render();setTimeout(()=>{const x=document.getElementById('set-lists');x&&x.scrollIntoView({block:'nearest'})},60)">${em} ${l}</button>`).join('')}</div>
     <form class="row mb" onsubmit="event.preventDefault();listAdd('${k}',this.v.value)"><input class="inp" name="v" placeholder="Tambah ${word} baru…" maxlength="40"><button class="btn primary" aria-label="Tambah">${ic('plus')}</button></form>
-    ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
+    ${LIST_FIXED[k] ? LIST_FIXED[k]().map(v => `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(listLabel(k, v))}</span>${listUsage(k, v) ? `<span class="pill neutral">${listUsage(k, v)} dipakai</span>` : ''}<span class="pill" title="Jenis bawaan tidak bisa diubah/dihapus">${ic('lock')} bawaan</span></div>`).join('') : ''}
+    ${items.length ? items.map((v, i) => { const n = listUsage(k, v); return `<div class="opt-row"><span class="grow ell" style="font-weight:600">${esc(v)}</span>${n ? `<span class="pill neutral">${n} dipakai</span>` : ''}<div class="acts"><button class="icon-btn" title="Ubah" onclick="listEdit('${k}',${i})">${ic('edit')}</button><button class="icon-btn" title="Hapus" style="color:var(--out)" onclick="listDel('${k}',${i})">${ic('trash')}</button></div></div>`; }).join('') : LIST_FIXED[k] ? `<p class="xs muted">Belum ada ${word} tambahan. Contoh: Koperasi, Tabungan Emas, Kas Kecil Gudang.</p>` : `<p class="muted small">Belum ada ${word}.</p>`}</div>`;
 }
 
 /* =====================================================================
